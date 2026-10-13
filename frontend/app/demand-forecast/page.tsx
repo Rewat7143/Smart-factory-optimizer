@@ -44,14 +44,14 @@ export default function DemandForecastPage() {
     if (isLive) {
       return {
         maximum_demand: {
-          current_demand_kw: 198.5,
-          today_highest_peak_kw: 198.5,
-          month_highest_peak_kw: 198.5,
+          current_demand_kw: 0.0,
+          today_highest_peak_kw: 0.0,
+          month_highest_peak_kw: 0.0,
           configured_demand_limit_kw: 200.0,
           safe_operating_limit_kw: 140.0,
-          predicted_peak_kw: 198.5,
+          predicted_peak_kw: 0.0,
           predicted_peak_time: '--:--',
-          remaining_buffer_kw: 1.5,
+          remaining_buffer_kw: 140.0,
           unit: 'VA',
         },
         actual_vs_forecast: {
@@ -65,7 +65,7 @@ export default function DemandForecastPage() {
           forecast_kw: Array(24).fill(0.0),
           cmd_limit_kw: 200.0,
           safe_limit_kw: 140.0,
-          predicted_peak_kw: 198.5,
+          predicted_peak_kw: 0.0,
           predicted_peak_time: '--:--',
           unit: 'VA',
         },

@@ -273,28 +273,28 @@ export default function FieldEngineerPictorialView() {
     if (isLive) {
       return {
         energy_consumption: {
-          units_today: 184.5,
-          units_this_month: 4200.0,
-          total_energy_kwh: 175.131,
-          total_apparent_energy_kvah: 193.873,
-          total_energy_wh: 175131.3,
-          total_apparent_energy_vah: 193873.1,
+          units_today: 0.0,
+          units_this_month: 0.0,
+          total_energy_kwh: 0.0,
+          total_apparent_energy_kvah: 0.0,
+          total_energy_wh: 0.0,
+          total_apparent_energy_vah: 0.0,
         },
         maximum_demand: {
-          current_demand_kw: 198.5,
-          watts_total: 195.0,
-          va_total: 198.5,
-          today_highest_peak_kw: 198.5,
-          month_highest_peak_kw: 198.5,
-          today_highest_peak_w: 195.0,
-          month_highest_peak_w: 195.0,
+          current_demand_kw: 0.0,
+          watts_total: 0.0,
+          va_total: 0.0,
+          today_highest_peak_kw: 0.0,
+          month_highest_peak_kw: 0.0,
+          today_highest_peak_w: 0.0,
+          month_highest_peak_w: 0.0,
           configured_demand_limit_kw: 200.0,
           safe_operating_limit_kw: 140.0,
         },
         power_quality: {
-          current_power_factor: 0.98,
-          today_power_factor: 0.98,
-          monthly_power_factor: 0.97,
+          current_power_factor: 0.95,
+          today_power_factor: 0.95,
+          monthly_power_factor: 0.95,
         }
       }
     }
@@ -335,8 +335,20 @@ export default function FieldEngineerPictorialView() {
   const energyKvah = Number(ec.total_apparent_energy_kvah ?? 0.0)
 
   // Live mode values (W, VA, Wh, VAh)
-  const powerWatts = Number(md.watts_total ?? (isLive ? (powerKw > 0 ? (powerKw < 5 ? powerKw * 1000 : powerKw) : 195.0) : (powerKw * 1000)))
-  const powerVa = Number(md.va_total ?? (isLive ? (md.current_demand_kw ?? (powerWatts / (pfCurrent || 0.95))) : powerKva))
+  const powerWatts = Number(
+    md.watts_total !== undefined && md.watts_total !== null
+      ? md.watts_total
+      : isLive
+      ? (powerKw > 0 ? (powerKw < 5 ? powerKw * 1000 : powerKw) : 0.0)
+      : powerKw * 1000
+  )
+  const powerVa = Number(
+    md.va_total !== undefined && md.va_total !== null
+      ? md.va_total
+      : isLive
+      ? (md.current_demand_kw ?? (pfCurrent > 0 ? powerWatts / pfCurrent : powerWatts))
+      : powerKva
+  )
   const energyWh = Number(ec.total_energy_wh ?? (energyKwh * 1000))
   const energyVah = Number(ec.total_apparent_energy_vah ?? (energyKvah * 1000))
 

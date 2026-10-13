@@ -632,12 +632,15 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
         if latest_reading.v_ll_avg is not None: v_ll_avg = round(latest_reading.v_ll_avg, 1)
         
         watts_total = float(latest_reading.watts_total or ((latest_reading.active_power_kw or 0.0) * 1000.0))
-        va_total = float(latest_reading.va_total or (watts_total / pf_avg if (watts_total and pf_avg) else 0.0))
+        pf_safe = pf_avg if (pf_avg and pf_avg > 0.05) else 0.95
+        va_total = float(latest_reading.va_total or (watts_total / pf_safe if (watts_total and pf_safe) else 0.0))
         
         if is_live_mode:
             current_demand_kw = round(va_total if va_total > 0 else watts_total, 1)
         else:
             current_demand_kw = round(latest_reading.active_power_kw or 0.0, 2)
+    else:
+        pf_safe = 0.95
 
     is_live_meter = bool(latest_reading and latest_reading.data_source == DataSource.RASPBERRY_PI)
     now_local = datetime.now()
@@ -653,8 +656,8 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
 
     if cache_pool:
         if is_live_mode:
-            peak_cache_val = max([float(r.va_total or (((r.watts_total or 0.0) or ((r.active_power_kw or 0.0) * 1000.0)) / (r.pf_avg or 0.95))) for r in cache_pool], default=current_demand_kw)
-            peak_cache_item = max(cache_pool, key=lambda r: float(r.va_total or (((r.watts_total or 0.0) or ((r.active_power_kw or 0.0) * 1000.0)) / (r.pf_avg or 0.95))))
+            peak_cache_val = max([float(r.va_total or (((r.watts_total or 0.0) or ((r.active_power_kw or 0.0) * 1000.0)) / (r.pf_avg if (r.pf_avg and r.pf_avg > 0.05) else 0.95))) for r in cache_pool], default=current_demand_kw)
+            peak_cache_item = max(cache_pool, key=lambda r: float(r.va_total or (((r.watts_total or 0.0) or ((r.active_power_kw or 0.0) * 1000.0)) / (r.pf_avg if (r.pf_avg and r.pf_avg > 0.05) else 0.95))))
             peak_cache_time = peak_cache_item.timestamp.strftime("%H:%M")
         else:
             peak_cache_item = max(cache_pool, key=lambda r: (r.active_power_kw or 0.0))
@@ -681,7 +684,7 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
             """).fetchone()
             if row and row["active_power_kw"] is not None:
                 raw_db_peak = float(row["active_power_kw"])
-                db_peak_val = (raw_db_peak * 1000.0 / pf_avg) if is_live_mode else raw_db_peak
+                db_peak_val = (raw_db_peak * 1000.0 / pf_safe) if is_live_mode else raw_db_peak
                 try:
                     ts_dt = datetime.fromisoformat(str(row["timestamp"]).replace('Z', '+00:00'))
                     db_peak_time = ts_dt.strftime("%H:%M")
@@ -697,7 +700,7 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
             """).fetchone()
             if m_row and m_row["m_peak"] is not None:
                 raw_m_peak = float(m_row["m_peak"])
-                month_peak_val = (raw_m_peak * 1000.0 / pf_avg) if is_live_mode else raw_m_peak
+                month_peak_val = (raw_m_peak * 1000.0 / pf_safe) if is_live_mode else raw_m_peak
                 month_peak_val = max(month_peak_val, peak_cache_val, current_demand_kw)
 
             # Query today's hourly averages for the actual demand curve
@@ -713,7 +716,7 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
             for r in h_rows:
                 if r["hr"] is not None and r["avg_kw"] is not None:
                     avg_kw = float(r["avg_kw"])
-                    val = (avg_kw * 1000.0 / pf_avg) if is_live_mode else avg_kw
+                    val = (avg_kw * 1000.0 / pf_safe) if is_live_mode else avg_kw
                     db_hourly_map[int(r["hr"])] = round(val, 1 if is_live_mode else 2)
     except Exception as e:
         print(f"Error querying telemetry DB in layman_analytics: {e}")
@@ -775,7 +778,7 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
                 hour=h,
                 day_of_week=current_dow
             )
-            pred_val = (pred_kw * 1000.0 / pf_avg) if is_live_mode else pred_kw
+            pred_val = (pred_kw * 1000.0 / pf_safe) if is_live_mode else pred_kw
             base_hourly_kwh.append(round(pred_val, 1 if is_live_mode else 2))
             forecast_hourly_kw.append(round(pred_val, 1 if is_live_mode else 2))
 
@@ -812,7 +815,7 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
                     idx = (dow - 1) % 7 # 0=Mon, ..., 6=Sun
                     avg_p = float(r["avg_kw"] or 0.0)
                     e_val = (avg_p * 24.0 * 1000.0) if is_live_mode else (avg_p * 24.0)
-                    p_val = (float(r["max_kw"] or 0.0) * 1000.0 / pf_avg) if is_live_mode else float(r["max_kw"] or 0.0)
+                    p_val = (float(r["max_kw"] or 0.0) * 1000.0 / pf_safe) if is_live_mode else float(r["max_kw"] or 0.0)
                     weekly_kwh[idx] = round(e_val, 1)
                     weekly_peak[idx] = round(p_val, 1)
     except Exception as e:
@@ -974,8 +977,8 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
         "safe_operating_limit_kw": safe_operating_kw,
         "watts_total": round(watts_total, 1),
         "va_total": round(va_total, 1),
-        "today_highest_peak_w": round(peak_demand_kw * (pf_avg if is_live_mode else 1.0), 1),
-        "month_highest_peak_w": round(month_peak_val * (pf_avg if is_live_mode else 1.0), 1),
+        "today_highest_peak_w": round(peak_demand_kw * (pf_safe if is_live_mode else 1.0), 1),
+        "month_highest_peak_w": round(month_peak_val * (pf_safe if is_live_mode else 1.0), 1),
         "predicted_peak_kw": predicted_peak_kw,
         "predicted_peak_time": predicted_peak_time,
         "remaining_buffer_kw": remaining_buffer_kw,
