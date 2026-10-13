@@ -59,11 +59,16 @@ class DemandForecaster:
         try:
             pred_kwh = float(self.model.predict(X)[0])
             raw_kw = pred_kwh * 4.0
-            # Blend autoregressive response with current operating setpoint
-            pred_kw = round(current_demand * 0.65 + raw_kw * 0.35, 1)
-            return max(40.0, min(120.0, pred_kw))
+            if current_demand < 15.0:
+                # Scaled diurnal pattern for low-power hardware testing without artificial minimum
+                factor = min(1.4, max(0.65, raw_kw / 75.0))
+                pred_kw = round(current_demand * factor, 2)
+            else:
+                # Blend autoregressive response with current operating setpoint
+                pred_kw = round(current_demand * 0.65 + raw_kw * 0.35, 1)
+            return max(0.0, min(150.0, pred_kw))
         except Exception:
-            return round(current_demand * 1.02, 1)
+            return round(current_demand * 1.02, 2)
 
     def predict_15m_from_history(self, history_df: pd.DataFrame) -> dict:
         """
@@ -74,14 +79,14 @@ class DemandForecaster:
             if len(history_df) > 0 and 'power_kw' in history_df:
                 cur = float(history_df['power_kw'].iloc[-1])
             else:
-                cur = 90.8
+                cur = 0.0
             t_next = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=15)).isoformat()
-            return {'timestamp': t_next, 'predicted_kw': round(cur * 1.02, 1)}
+            return {'timestamp': t_next, 'predicted_kw': round(cur * 1.02, 2)}
 
         if len(history_df) == 0:
             now = datetime.datetime.now(datetime.timezone.utc)
             t_pred = now + datetime.timedelta(minutes=15)
-            return {'timestamp': t_pred.isoformat(), 'predicted_kw': 91.5}
+            return {'timestamp': t_pred.isoformat(), 'predicted_kw': 0.0}
 
         # Clean dataframe
         df = history_df.copy()
@@ -117,11 +122,14 @@ class DemandForecaster:
         try:
             pred_kwh = float(self.model.predict(X)[0])
             raw_kw = pred_kwh * 4.0
-            # Blend autoregressive model response with current operating baseline
-            pred_kw = round(current_kw * 0.65 + raw_kw * 0.35, 1)
-            pred_kw = max(45.0, min(120.0, pred_kw))
+            if current_kw < 15.0:
+                factor = min(1.4, max(0.65, raw_kw / 75.0))
+                pred_kw = round(current_kw * factor, 2)
+            else:
+                pred_kw = round(current_kw * 0.65 + raw_kw * 0.35, 1)
+            pred_kw = max(0.0, min(150.0, pred_kw))
         except Exception:
-            pred_kw = round(current_kw * 1.02, 1)
+            pred_kw = round(current_kw * 1.02, 2)
 
         return {
             'timestamp': t_pred.isoformat(),
@@ -135,13 +143,13 @@ class DemandForecaster:
         """
         if not self.load():
             now = datetime.datetime.now(datetime.timezone.utc)
-            base_kw = 90.8
+            base_kw = 0.0
             if len(history_df) > 0 and 'power_kw' in history_df:
                 base_kw = float(history_df['power_kw'].iloc[-1])
             return [
                 {
                     'timestamp': (now + datetime.timedelta(minutes=15 * s)).isoformat(),
-                    'predicted_kw': round(base_kw + (s * 0.4), 1),
+                    'predicted_kw': round(base_kw + (s * 0.01), 2),
                     'horizon_min': 15 * s
                 }
                 for s in range(1, steps + 1)
@@ -149,8 +157,8 @@ class DemandForecaster:
 
         if len(history_df) == 0:
             now = datetime.datetime.now(datetime.timezone.utc)
-            current_kw = 90.8
-            rolling_kw = 90.8
+            current_kw = 0.0
+            rolling_kw = 0.0
         else:
             df = history_df.copy()
             df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
@@ -182,10 +190,14 @@ class DemandForecaster:
             try:
                 pred_kwh = float(self.model.predict(X)[0])
                 raw_kw = pred_kwh * 4.0
-                step_kw = round(current_kw * 0.65 + raw_kw * 0.35, 1)
-                step_kw = max(45.0, min(120.0, step_kw))
+                if current_kw < 15.0:
+                    factor = min(1.4, max(0.65, raw_kw / 75.0))
+                    step_kw = round(current_kw * factor, 2)
+                else:
+                    step_kw = round(current_kw * 0.65 + raw_kw * 0.35, 1)
+                step_kw = max(0.0, min(150.0, step_kw))
             except Exception:
-                step_kw = round(cur_step_kw * 1.01, 1)
+                step_kw = round(cur_step_kw * 1.01, 2)
 
             forecast_points.append({
                 'timestamp': t_future.isoformat(),

@@ -40,13 +40,13 @@ export default function DemandForecastPage() {
 
     return {
       maximum_demand: {
-        current_demand_kw: 90.92,
-        today_highest_peak_kw: 94.19,
-        month_highest_peak_kw: 94.19,
+        current_demand_kw: 0.0,
+        today_highest_peak_kw: 0.0,
+        month_highest_peak_kw: 0.0,
         configured_demand_limit_kw: 100.0,
-        predicted_peak_kw: 88.4,
-        predicted_peak_time: '14:30',
-        remaining_buffer_kw: 5.81,
+        predicted_peak_kw: 0.0,
+        predicted_peak_time: '--:--',
+        remaining_buffer_kw: 100.0,
       },
       actual_vs_forecast: {
         hours: [
@@ -54,60 +54,51 @@ export default function DemandForecastPage() {
           '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00',
           '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00',
         ],
-        actual_kw: [
-          22.0, 20.5, 19.8, 18.2, 24.0, 31.5, 52.0, 72.4,
-          85.0, 89.2, 91.1, 90.9, null, null, null, null,
-          null, null, null, null, null, null, null, null,
-        ],
-        forecast_kw: [
-          22.0, 20.5, 19.8, 18.2, 24.0, 31.5, 52.0, 72.4,
-          85.0, 89.2, 91.1, 90.9, 78.0, 82.5, 88.4, 84.1,
-          74.0, 62.5, 54.0, 42.5, 34.0, 28.0, 24.5, 22.0,
-        ],
+        actual_kw: Array(24).fill(null),
+        forecast_kw: Array(24).fill(0.0),
         cmd_limit_kw: 100.0,
         safe_limit_kw: 90.0,
-        predicted_peak_kw: 88.4,
-        predicted_peak_time: '14:30',
+        predicted_peak_kw: 0.0,
+        predicted_peak_time: '--:--',
       },
       timeframes: {
         day: {
           labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
-          values: [21.5, 25.0, 85.0, 91.1, 74.0, 32.0],
-          peak: 91.1,
-          total: 1284.5,
+          values: [0, 0, 0, 0, 0, 0],
+          peak: 0.0,
+          total: 0.0,
           unit: 'kWh',
         },
         week: {
           labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-          values: [1340, 1420, 1284, 1390, 1450, 920, 610],
-          peaks: [92.4, 94.2, 91.1, 93.0, 94.8, 62.1, 41.5],
-          peak: 94.8,
-          total: 8414.0,
+          values: [0, 0, 0, 0, 0, 0, 0],
+          peaks: [0, 0, 0, 0, 0, 0, 0],
+          peak: 0.0,
+          total: 0.0,
           unit: 'kWh',
         },
         month: {
           labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-          values: [9450, 9820, 9640, 10040],
-          peaks: [94.0, 94.8, 93.5, 94.2],
-          peak: 94.8,
-          total: 38950.0,
+          values: [0, 0, 0, 0],
+          peaks: [0, 0, 0, 0],
+          peak: 0.0,
+          total: 0.0,
           unit: 'kWh',
         },
         year: {
-          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'],
-          values: [37500, 36200, 39100, 38400, 40100, 41200, 39800, 39200, 38950, 38950],
-          peaks: [92.0, 93.1, 94.5, 95.0, 96.2, 95.8, 94.1, 93.5, 94.2, 94.2],
-          peak: 96.2,
-          total: 389400.0,
+          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+          values: Array(12).fill(0),
+          peaks: Array(12).fill(0),
+          peak: 0.0,
+          total: 0.0,
           unit: 'kWh',
         },
       },
       optimization_opportunity: {
-        title: 'Stagger Compressor C-02 & Induction Furnace Startup',
-        suggestion:
-          'Shift Compressor C-02 heavy cycle from 14:15 to 15:00 to prevent predicted peak of 88.4 kW from approaching the 90 kW safe limit.',
-        potential_savings: '₹ 4,200 avoiding peak demand utility surcharge',
-        predicted_peak_avoided_kw: 11.9,
+        title: 'Real-time AI Forecasting Active',
+        suggestion: 'Connecting to live hardware meter and telemetry database for continuous peak demand inference...',
+        potential_savings: '₹ 0 (Monitoring active)',
+        predicted_peak_avoided_kw: 0.0,
       },
     }
   }, [analytics])
@@ -118,13 +109,21 @@ export default function DemandForecastPage() {
   const opp = data.optimization_opportunity || {}
   const pq = data.power_quality || {}
 
-  const currentDemand = Number(md.current_demand_kw || 90.92)
-  const peakDemand = Number(md.today_highest_peak_kw || currentDemand)
-  const contractLimit = Number(md.configured_demand_limit_kw || 100.0)
-  const safeLimit = Number(af.safe_limit_kw || 90.0)
-  const predictedPeak = Number(af.predicted_peak_kw || 88.4)
-  const predictedPeakTime = String(af.predicted_peak_time || '14:30')
-  const currentPf = Number(pq.current_power_factor || 0.95)
+  const currentDemand = Number(md.current_demand_kw ?? 0.0)
+  const peakDemand = Number(md.today_highest_peak_kw ?? currentDemand)
+  const contractLimit = Number(md.configured_demand_limit_kw ?? 100.0)
+  const safeLimit = Number(af.safe_limit_kw ?? 90.0)
+  const predictedPeak = Number(af.predicted_peak_kw ?? currentDemand)
+  const predictedPeakTime = String(af.predicted_peak_time || '--:--')
+  const currentPf = Number(pq.current_power_factor ?? 0.95)
+
+  // Dynamic Y-axis max for sub-kilowatt bench testing vs industrial scale
+  const yAxisMax24h = useMemo(() => {
+    const maxVal = Math.max(currentDemand, peakDemand, predictedPeak)
+    if (maxVal < 1.0) return 1.0
+    if (maxVal < 5.0) return Math.ceil(maxVal * 2.0)
+    return Math.max(110, Math.ceil(maxVal * 1.15))
+  }, [currentDemand, peakDemand, predictedPeak])
 
   // ECharts 1: 24-Hour Actual vs AI Predicted Demand Curve
   const chartOptions24h = useMemo(() => {
@@ -154,7 +153,10 @@ export default function DemandForecastPage() {
         },
       },
       legend: {
-        data: ['Actual Measured Demand', 'AI Forecast Demand', 'Safe Operating Limit (90 kW)', 'Contract Ceiling (100 kW)'],
+        data:
+          yAxisMax24h >= 100
+            ? ['Actual Measured Demand', 'AI Forecast Demand', 'Safe Operating Limit (90 kW)', 'Contract Ceiling (100 kW)']
+            : ['Actual Measured Demand', 'AI Forecast Demand'],
         top: 8,
         textStyle: { fontWeight: 'bold', fontSize: 11, color: '#1e293b' },
       },
@@ -177,7 +179,7 @@ export default function DemandForecastPage() {
         name: 'Demand (kW)',
         nameTextStyle: { fontWeight: 'bold', color: '#1e293b', fontSize: 12 },
         min: 0,
-        max: 110,
+        max: yAxisMax24h,
         axisLine: { show: true, lineStyle: { color: '#94a3b8' } },
         splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } },
         axisLabel: { fontWeight: 'bold', color: '#334155' },
@@ -220,33 +222,37 @@ export default function DemandForecastPage() {
             data: [
               {
                 coord: [predictedPeakTime.split(':')[0] + ':00', predictedPeak],
-                value: `Crest: ${predictedPeak} kW`,
+                value: `Crest: ${predictedPeak.toFixed(2)} kW`,
                 itemStyle: { color: '#e11d48' },
               },
             ],
           },
         },
-        {
-          name: 'Safe Operating Limit (90 kW)',
-          type: 'line',
-          data: Array(hours.length).fill(safeLimit),
-          silent: true,
-          lineStyle: { type: 'dashed', width: 2.5, color: '#d97706' },
-          itemStyle: { color: '#d97706' },
-          symbol: 'none',
-        },
-        {
-          name: 'Contract Ceiling (100 kW)',
-          type: 'line',
-          data: Array(hours.length).fill(contractLimit),
-          silent: true,
-          lineStyle: { type: 'solid', width: 2.5, color: '#dc2626' },
-          itemStyle: { color: '#dc2626' },
-          symbol: 'none',
-        },
+        ...(yAxisMax24h >= 100
+          ? [
+              {
+                name: 'Safe Operating Limit (90 kW)',
+                type: 'line',
+                data: Array(hours.length).fill(safeLimit),
+                silent: true,
+                lineStyle: { type: 'dashed', width: 2.5, color: '#d97706' },
+                itemStyle: { color: '#d97706' },
+                symbol: 'none',
+              },
+              {
+                name: 'Contract Ceiling (100 kW)',
+                type: 'line',
+                data: Array(hours.length).fill(contractLimit),
+                silent: true,
+                lineStyle: { type: 'solid', width: 2.5, color: '#dc2626' },
+                itemStyle: { color: '#dc2626' },
+                symbol: 'none',
+              },
+            ]
+          : []),
       ],
     }
-  }, [af, safeLimit, contractLimit, predictedPeak, predictedPeakTime])
+  }, [af, safeLimit, contractLimit, predictedPeak, predictedPeakTime, yAxisMax24h])
 
   // ECharts 2: Multi-Timeframe Historical Analysis
   const chartOptionsTimeframe = useMemo(() => {
@@ -284,7 +290,7 @@ export default function DemandForecastPage() {
           type: 'value',
           name: 'Peak kW',
           min: 0,
-          max: 120,
+          max: peaks && Math.max(...peaks.map(Number), 0) < 5.0 ? 2.0 : 120,
           axisLabel: { fontWeight: 'bold', color: '#334155' },
           splitLine: { show: false },
         },
@@ -361,14 +367,16 @@ export default function DemandForecastPage() {
           <div className="text-2xl font-black text-rose-700 mt-1">
             {peakDemand.toFixed(2)} <span className="text-xs font-bold text-slate-600">kW</span>
           </div>
-          <div className="text-[11px] font-bold text-slate-500 mt-0.5">Recorded at 10:15 Shift 1</div>
+          <div className="text-[11px] font-bold text-slate-500 mt-0.5">
+            {md.today_highest_peak_time ? `Recorded at ${md.today_highest_peak_time}` : 'Live Monitoring'}
+          </div>
         </div>
 
         {/* Card 3: AI Predicted Peak Crest */}
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="text-[11px] font-black uppercase text-indigo-700 tracking-wider">AI Forecast Peak</div>
           <div className="text-2xl font-black text-indigo-950 mt-1">
-            {predictedPeak.toFixed(1)} <span className="text-xs font-bold text-slate-600">kW</span>
+            {predictedPeak.toFixed(2)} <span className="text-xs font-bold text-slate-600">kW</span>
           </div>
           <div className="text-[11px] font-bold text-indigo-800 mt-0.5">Expected at {predictedPeakTime}</div>
         </div>
@@ -408,7 +416,7 @@ export default function DemandForecastPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-black bg-indigo-50 border border-indigo-200 text-indigo-900 px-3 py-1 rounded-lg">
-              Predicted Crest: {predictedPeak} kW @ {predictedPeakTime}
+              Predicted Crest: {predictedPeak.toFixed(2)} kW @ {predictedPeakTime}
             </span>
           </div>
         </div>
@@ -473,28 +481,36 @@ export default function DemandForecastPage() {
               <span className="text-xs font-black bg-indigo-600 text-white px-2.5 py-0.5 rounded-full uppercase">
                 AI Optimization Opportunity
               </span>
-              <span className="text-xs font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
-                Operator Approval Required
+              <span
+                className={`text-xs font-black px-2 py-0.5 rounded ${
+                  opp.operator_approval_required
+                    ? 'text-amber-800 bg-amber-100'
+                    : 'text-emerald-800 bg-emerald-100'
+                }`}
+              >
+                {opp.operator_approval_required ? 'Operator Approval Required' : 'Optimal Load Status'}
               </span>
             </div>
 
             <h3 className="text-lg font-black text-indigo-950 tracking-tight mb-2">
-              {opp.title || 'Stagger Compressor C-02 & Induction Furnace Startup'}
+              {opp.title || 'Optimal Load Distribution & Surcharge Protection'}
             </h3>
 
             <p className="text-xs font-bold text-slate-700 leading-relaxed mb-4">
               {opp.suggestion ||
-                'Shift Compressor C-02 heavy cycle from 14:15 to 15:00 to prevent predicted peak of 88.4 kW from approaching the 90 kW safe limit.'}
+                `Real-time factory demand (${currentDemand.toFixed(2)} kW) and 24h AI peak forecast (${predictedPeak.toFixed(2)} kW @ ${predictedPeakTime}) are within sanctioned limits.`}
             </p>
 
             <div className="space-y-3 bg-white border border-indigo-100 rounded-2xl p-4 shadow-2xs">
               <div className="flex items-center justify-between text-xs font-black text-slate-700">
                 <span>Predicted Peak Avoided:</span>
-                <span className="text-emerald-700 text-sm font-black">-{opp.predicted_peak_avoided_kw || 11.9} kW</span>
+                <span className="text-emerald-700 text-sm font-black">
+                  {opp.predicted_peak_avoided_kw ? `-${opp.predicted_peak_avoided_kw} kW` : '0.0 kW (Within limit)'}
+                </span>
               </div>
               <div className="flex items-center justify-between text-xs font-black text-slate-700">
                 <span>Potential Penalty Saved:</span>
-                <span className="text-emerald-700 text-sm font-black">{opp.potential_savings || '₹ 4,200'}</span>
+                <span className="text-emerald-700 text-sm font-black">{opp.potential_savings || '₹ 0 (Zero penalty)'}</span>
               </div>
               <div className="flex items-center justify-between text-xs font-black text-slate-700">
                 <span>Execution Method:</span>
@@ -504,18 +520,24 @@ export default function DemandForecastPage() {
           </div>
 
           <div className="mt-6 pt-4 border-t border-indigo-200">
-            {optimizationApproved ? (
-              <div className="bg-emerald-100 border border-emerald-300 text-emerald-950 font-black text-xs py-3 px-4 rounded-xl text-center shadow-xs">
-                ✓ Protocol Authorized & Synchronized with SCADA PLC
-              </div>
+            {opp.operator_approval_required ? (
+              optimizationApproved ? (
+                <div className="bg-emerald-100 border border-emerald-300 text-emerald-950 font-black text-xs py-3 px-4 rounded-xl text-center shadow-xs">
+                  ✓ Protocol Authorized & Synchronized with SCADA PLC
+                </div>
+              ) : (
+                <button
+                  onClick={() => setOptimizationApproved(true)}
+                  className="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-black text-xs py-3.5 px-4 rounded-xl transition-all shadow-md uppercase tracking-wider flex items-center justify-center gap-2"
+                >
+                  <span>Authorize AI Load Shifting Protocol</span>
+                  <span>&rarr;</span>
+                </button>
+              )
             ) : (
-              <button
-                onClick={() => setOptimizationApproved(true)}
-                className="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-black text-xs py-3.5 px-4 rounded-xl transition-all shadow-md uppercase tracking-wider flex items-center justify-center gap-2"
-              >
-                <span>Authorize AI Load Shifting Protocol</span>
-                <span>&rarr;</span>
-              </button>
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-xs py-3 px-4 rounded-xl text-center">
+                ✓ Continuous AI Surcharge Guard Active • Factory demand well within contract threshold
+              </div>
             )}
             <p className="text-[10px] font-bold text-slate-500 text-center mt-2">
               No physical machine setpoint is altered without human supervisor authorization.
