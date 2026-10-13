@@ -84,6 +84,7 @@ class RelayController:
         }
 
         self.current_state: str = RelayState.NORMAL
+        self.control_mode: str = "AUTO"  # "AUTO" or "MANUAL"
         self.last_stage_transition_time: float = 0.0
         self.last_restore_action_time: float = 0.0
 
@@ -92,7 +93,7 @@ class RelayController:
         
         mode_str = "MONITOR_ONLY (Simulated, Coils Safe)" if self.monitor_only else "ACTIVE (Hardware Actuation Enabled)"
         logger.info(
-            f"[RelayController] Initialized in {mode_str}. "
+            f"[RelayController] Initialized in {mode_str}. Control Mode: {self.control_mode}. "
             f"Peak Threshold: {self.threshold_kw} kW. Hysteresis: {self.hysteresis_kw} kW."
         )
 
@@ -115,13 +116,18 @@ class RelayController:
         if apparent_power_va is not None and apparent_power_va > 0.0:
             effective_kw = max(effective_kw, round(apparent_power_va / 1000.0, 4))
 
+        restore_threshold = max(0.0, (self.threshold_kw or 0.0) - self.hysteresis_kw)
+
+        # In MANUAL mode, operator controls relays directly without automated state-machine overrides
+        if self.control_mode == "MANUAL":
+            return self._build_report(active_power_kw, action_taken="MANUAL_HOLD", effective_demand_kw=effective_kw, restore_threshold=restore_threshold)
+
         # If threshold is unconfigured, remain in passive NORMAL state without guessing
         if self.threshold_kw is None or self.threshold_kw <= 0:
             self.current_state = RelayState.NORMAL
             return self._build_report(active_power_kw, action_taken, "Peak threshold unconfigured")
 
         warning_threshold = self.threshold_kw * self.warning_ratio
-        restore_threshold = max(0.0, self.threshold_kw - self.hysteresis_kw)
 
         # ----------------------------------------------------------------------
         # DEMAND EXCEEDS SAFE OPERATING THRESHOLD -> PRIORITY SHEDDING
@@ -200,15 +206,40 @@ class RelayController:
     def manual_command(self, channel_id: int, action: str) -> str:
         """Manual operator override for testing and interactive SCADA actuation."""
         now = time.time()
-        if action == "EMERGENCY_RESTORE_ALL":
+        act_up = (action or "").upper()
+
+        if act_up == "SET_MODE_AUTO":
+            self.control_mode = "AUTO"
+            logger.info("[RelayController] Switched to AUTONOMOUS ceiling load shedding mode.")
+            return "AUTO_ENABLED"
+        elif act_up == "SET_MODE_MANUAL":
+            self.control_mode = "MANUAL"
+            logger.info("[RelayController] Switched to MANUAL SCADA operator override mode.")
+            return "MANUAL_ENABLED"
+        elif act_up == "SET_POLARITY_ACTIVE_LOW":
+            if hasattr(self.adapter, "set_polarity"):
+                self.adapter.set_polarity(active_low=True)
+            return "POLARITY_ACTIVE_LOW"
+        elif act_up == "SET_POLARITY_ACTIVE_HIGH":
+            if hasattr(self.adapter, "set_polarity"):
+                self.adapter.set_polarity(active_low=False)
+            return "POLARITY_ACTIVE_HIGH"
+        elif act_up == "TEST_PULSE":
+            if hasattr(self.adapter, "test_pulse"):
+                self.adapter.test_pulse()
+            return "PULSE_TEST_DONE"
+        elif act_up == "EMERGENCY_RESTORE_ALL":
+            self.control_mode = "MANUAL"
             self.emergency_restore_all()
             return "ALL_RESTORED"
-        elif action in ("SHED", "OFF"):
+        elif act_up in ("SHED", "OFF"):
+            self.control_mode = "MANUAL"
             if channel_id in self.channels:
                 act = self._command_channel(channel_id, shed=True, timestamp=now)
                 self.last_stage_transition_time = now
                 return act
-        elif action in ("RESTORE", "ON"):
+        elif act_up in ("RESTORE", "ON"):
+            self.control_mode = "MANUAL"
             if channel_id in self.channels:
                 act = self._command_channel(channel_id, shed=False, timestamp=now)
                 self.last_restore_action_time = now
@@ -240,6 +271,8 @@ class RelayController:
         return {
             "state": self.current_state,
             "mode": "MONITOR_ONLY" if self.monitor_only else "ACTIVE",
+            "control_mode": self.control_mode,
+            "active_low": getattr(self.adapter, "active_low", True),
             "active_power_kw": round(active_power_kw, 3),
             "effective_demand_kw": round(eff_kw, 3),
             "threshold_kw": self.threshold_kw,

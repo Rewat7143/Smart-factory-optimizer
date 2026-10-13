@@ -420,12 +420,51 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
             GPIO.output(pin, level)
             logger.info(
                 f"[RPi4B Relay Adapter] Actuated Relay {channel} (BCM {pin}) -> Level "
-                f"{'HIGH (OFF)' if level == GPIO.HIGH else 'LOW (ON)'} (Load {'SHED/OFF' if state else 'RESTORED/ON'})."
+                f"{'HIGH (3.3V)' if level == GPIO.HIGH else 'LOW (0V)'} (Load {'SHED/OFF' if state else 'RESTORED/ON'}, Active-Low={self.active_low})."
             )
             return True
         except Exception as e:
             logger.error(f"[RPi4B Relay Adapter] Failed to actuate Relay {channel}: {e}")
             return False
+
+    def set_polarity(self, active_low: bool) -> None:
+        """Dynamically update relay trigger polarity without service restart."""
+        self.active_low = active_low
+        logger.info(f"[RPi4B Relay Adapter] Polarity updated: Active-Low={self.active_low}")
+        if self._gpio_initialized and not self.monitor_only:
+            for ch, state in self.states.items():
+                self.set_relay(ch, state)
+
+    def test_pulse(self, cycles: int = 3) -> None:
+        """Rapidly toggles all configured relays so the user can visually verify LEDs and hear clicks."""
+        if not self._gpio_initialized or self.monitor_only or not RPI_GPIO_AVAILABLE:
+            logger.warning("[RPi4B Relay Adapter] Cannot run test pulse: GPIO not initialized or in monitor-only mode.")
+            return
+
+        import time
+        logger.info("[RPi4B Relay Adapter] Executing diagnostic test pulse on all relay pins...")
+        try:
+            for i in range(cycles):
+                # Cycle LOW (0V)
+                for ch, pin in self.pins.items():
+                    if pin is not None:
+                        GPIO.setup(pin, GPIO.OUT)
+                        GPIO.output(pin, GPIO.LOW)
+                time.sleep(0.4)
+
+                # Cycle HIGH (3.3V)
+                for ch, pin in self.pins.items():
+                    if pin is not None:
+                        GPIO.setup(pin, GPIO.OUT)
+                        GPIO.output(pin, GPIO.HIGH)
+                time.sleep(0.4)
+
+            # Re-apply tracked state
+            for ch, state in self.states.items():
+                self.set_relay(ch, state)
+            logger.info("[RPi4B Relay Adapter] Diagnostic test pulse finished successfully.")
+        except Exception as e:
+            logger.error(f"[RPi4B Relay Adapter] Error during test pulse: {e}")
 
     def get_relay_state(self, channel: int) -> bool:
         return self.states.get(channel, False)

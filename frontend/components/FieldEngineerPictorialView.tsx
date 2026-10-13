@@ -270,9 +270,9 @@ export default function FieldEngineerPictorialView() {
   const [relayActionLoading, setRelayActionLoading] = useState<number | string | null>(null)
   const [relayMessage, setRelayMessage] = useState<string>('')
 
-  const handleRelayAction = async (channel: number | null, action: 'SHED' | 'RESTORE' | 'EMERGENCY_RESTORE_ALL') => {
+  const handleRelayAction = async (channel: number | null, action: string) => {
     try {
-      setRelayActionLoading(channel !== null ? channel : action)
+      setRelayActionLoading(channel !== null ? `${channel}_${action}` : action)
       setRelayMessage(`Dispatching ${action} to Raspberry Pi...`)
       const baseUrl = (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000/api` : 'http://localhost:8000/api')
       const res = await fetch(`${baseUrl}/relays/control`, {
@@ -281,7 +281,7 @@ export default function FieldEngineerPictorialView() {
         body: JSON.stringify({ channel: channel || 1, action })
       })
       if (res.ok) {
-        setRelayMessage(`✓ ${action} command sent successfully!`)
+        setRelayMessage(`✓ ${action} dispatched successfully!`)
         setTimeout(() => setRelayMessage(''), 3500)
       } else {
         setRelayMessage(`Command error: ${res.statusText}`)
@@ -405,6 +405,8 @@ export default function FieldEngineerPictorialView() {
   const relays = data.relays || analytics?.relays || {
     state: "NORMAL",
     mode: "ACTIVE",
+    control_mode: "AUTO",
+    active_low: true,
     threshold_kw: isLive ? 0.14 : 90.0,
     delay_seconds: 8.0,
     restart_delay_seconds: 10.0,
@@ -415,6 +417,9 @@ export default function FieldEngineerPictorialView() {
       "3": { channel_id: 3, name: "Relay 3 (Protected Load)", priority: 3, is_shed: false, state: "OPERATIONAL" }
     }
   }
+
+  const controlMode = relays.control_mode || 'AUTO'
+  const isActiveLow = relays.active_low !== false
 
   const ch1 = relays.channels?.[1] || relays.channels?.["1"] || { channel_id: 1, name: "Relay 1 (Opportunistic Load)", priority: 1, is_shed: false, state: "OPERATIONAL" }
   const ch2 = relays.channels?.[2] || relays.channels?.["2"] || { channel_id: 2, name: "Relay 2 (Flexible Load)", priority: 2, is_shed: false, state: "OPERATIONAL" }
@@ -757,8 +762,15 @@ export default function FieldEngineerPictorialView() {
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 ACTIVE HARDWARE ACTUATION (BCM 25, 24, 23)
               </span>
-              <span className="text-[11px] font-black bg-indigo-100 text-indigo-950 border border-indigo-200 px-2.5 py-0.5 rounded-full">
-                Mode: {relays.mode || 'ACTIVE'}
+              <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
+                controlMode === 'MANUAL'
+                  ? 'bg-amber-100 text-amber-950 border-amber-300'
+                  : 'bg-indigo-100 text-indigo-950 border-indigo-200'
+              }`}>
+                Control: {controlMode === 'MANUAL' ? '🖐️ MANUAL SCADA' : '🤖 AUTONOMOUS AI'}
+              </span>
+              <span className="text-[11px] font-black bg-slate-100 text-slate-800 border border-slate-300 px-2.5 py-0.5 rounded-full">
+                Polarity: {isActiveLow ? 'Active-LOW (0V=ON)' : 'Active-HIGH / NC (3.3V=ON)'}
               </span>
             </div>
             <p className="text-xs font-semibold text-slate-500">
@@ -767,25 +779,60 @@ export default function FieldEngineerPictorialView() {
           </div>
 
           {/* Master Control & Feedback */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             {relayMessage && (
               <span className="text-xs font-black text-indigo-900 bg-indigo-50 border border-indigo-300 px-3 py-1.5 rounded-xl shadow-xs animate-fade-in">
                 {relayMessage}
               </span>
             )}
+
+            {/* Mode Toggle Button */}
+            <button
+              onClick={() => handleRelayAction(null, controlMode === 'MANUAL' ? 'SET_MODE_AUTO' : 'SET_MODE_MANUAL')}
+              disabled={relayActionLoading !== null}
+              className={`font-black text-xs py-2 px-3 rounded-xl border transition-all cursor-pointer ${
+                controlMode === 'MANUAL'
+                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700 shadow-sm'
+                  : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
+              }`}
+            >
+              {controlMode === 'MANUAL' ? '🤖 Switch to Auto Interlock' : '🖐️ Switch to Manual SCADA'}
+            </button>
+
+            {/* Polarity Inversion Toggle */}
+            <button
+              onClick={() => handleRelayAction(null, isActiveLow ? 'SET_POLARITY_ACTIVE_HIGH' : 'SET_POLARITY_ACTIVE_LOW')}
+              disabled={relayActionLoading !== null}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xs py-2 px-3 rounded-xl border border-slate-300 transition-all cursor-pointer"
+              title="Toggle relay trigger logic between Active-Low and Active-High / NC"
+            >
+              🔄 Flip Polarity ({isActiveLow ? 'Set Active-High' : 'Set Active-Low'})
+            </button>
+
+            {/* Hardware Test Pulse */}
+            <button
+              onClick={() => handleRelayAction(null, 'TEST_PULSE')}
+              disabled={relayActionLoading !== null}
+              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-950 font-black text-xs py-2 px-3 rounded-xl border border-indigo-300 transition-all cursor-pointer"
+              title="Rapidly pulses all relays to verify board LEDs and clicks"
+            >
+              ⚡ Test Pulse (Blink LEDs)
+            </button>
+
+            {/* Master Emergency Restore */}
             <button
               onClick={() => handleRelayAction(null, 'EMERGENCY_RESTORE_ALL')}
               disabled={relayActionLoading !== null}
-              className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs md:text-sm py-2 px-4 rounded-xl shadow-sm flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-3.5 rounded-xl shadow-sm flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
             >
               {relayActionLoading === 'EMERGENCY_RESTORE_ALL' ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  Restoring All Relays...
+                  Restoring...
                 </>
               ) : (
                 <>
-                  <span>🚨 Emergency Restore All Relays</span>
+                  <span>🚨 Restore All</span>
                 </>
               )}
             </button>
@@ -835,7 +882,7 @@ export default function FieldEngineerPictorialView() {
                 PRIORITY 1: TURNS OFF 1ST
               </span>
               <span className="text-[11px] font-bold text-slate-500 font-mono">
-                BCM 25 &bull; Pin 22
+                BCM 25 &bull; <strong className="text-indigo-700">Pin 22</strong>
               </span>
             </div>
 
@@ -859,21 +906,21 @@ export default function FieldEngineerPictorialView() {
               </span>
             </div>
 
-            {/* Manual Controls */}
+            {/* Manual Controls - Always clickable */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => handleRelayAction(1, 'SHED')}
-                disabled={relayActionLoading !== null || ch1.is_shed}
-                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                disabled={relayActionLoading !== null}
+                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
               >
-                {relayActionLoading === 1 ? 'Dispatching...' : 'Turn OFF (Shed)'}
+                {relayActionLoading === '1_SHED' ? 'Dispatching...' : 'Turn OFF (Shed)'}
               </button>
               <button
                 onClick={() => handleRelayAction(1, 'RESTORE')}
-                disabled={relayActionLoading !== null || !ch1.is_shed}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                disabled={relayActionLoading !== null}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
               >
-                {relayActionLoading === 1 ? 'Dispatching...' : 'Turn ON (Restore)'}
+                {relayActionLoading === '1_RESTORE' ? 'Dispatching...' : 'Turn ON (Restore)'}
               </button>
             </div>
           </div>
@@ -889,7 +936,7 @@ export default function FieldEngineerPictorialView() {
                 PRIORITY 2: TURNS OFF 2ND (8s DWELL)
               </span>
               <span className="text-[11px] font-bold text-slate-500 font-mono">
-                BCM 24 &bull; Pin 18
+                BCM 24 &bull; <strong className="text-indigo-700">Pin 18</strong>
               </span>
             </div>
 
@@ -913,21 +960,21 @@ export default function FieldEngineerPictorialView() {
               </span>
             </div>
 
-            {/* Manual Controls */}
+            {/* Manual Controls - Always clickable */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => handleRelayAction(2, 'SHED')}
-                disabled={relayActionLoading !== null || ch2.is_shed}
-                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                disabled={relayActionLoading !== null}
+                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
               >
-                {relayActionLoading === 2 ? 'Dispatching...' : 'Turn OFF (Shed)'}
+                {relayActionLoading === '2_SHED' ? 'Dispatching...' : 'Turn OFF (Shed)'}
               </button>
               <button
                 onClick={() => handleRelayAction(2, 'RESTORE')}
-                disabled={relayActionLoading !== null || !ch2.is_shed}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                disabled={relayActionLoading !== null}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
               >
-                {relayActionLoading === 2 ? 'Dispatching...' : 'Turn ON (Restore)'}
+                {relayActionLoading === '2_RESTORE' ? 'Dispatching...' : 'Turn ON (Restore)'}
               </button>
             </div>
           </div>
@@ -943,7 +990,7 @@ export default function FieldEngineerPictorialView() {
                 PRIORITY 3: TURNS OFF 3RD (LAST RESORT)
               </span>
               <span className="text-[11px] font-bold text-slate-500 font-mono">
-                BCM 23 &bull; Pin 16
+                BCM 23 &bull; <strong className="text-indigo-700">Pin 16</strong>
               </span>
             </div>
 
@@ -967,25 +1014,73 @@ export default function FieldEngineerPictorialView() {
               </span>
             </div>
 
-            {/* Manual Controls */}
+            {/* Manual Controls - Always clickable */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => handleRelayAction(3, 'SHED')}
-                disabled={relayActionLoading !== null || ch3.is_shed}
-                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                disabled={relayActionLoading !== null}
+                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
               >
-                {relayActionLoading === 3 ? 'Dispatching...' : 'Turn OFF (Shed)'}
+                {relayActionLoading === '3_SHED' ? 'Dispatching...' : 'Turn OFF (Shed)'}
               </button>
               <button
                 onClick={() => handleRelayAction(3, 'RESTORE')}
-                disabled={relayActionLoading !== null || !ch3.is_shed}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                disabled={relayActionLoading !== null}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
               >
-                {relayActionLoading === 3 ? 'Dispatching...' : 'Turn ON (Restore)'}
+                {relayActionLoading === '3_RESTORE' ? 'Dispatching...' : 'Turn ON (Restore)'}
               </button>
             </div>
           </div>
 
+        </div>
+
+        {/* Hardware Wiring & Diagnostics Guide */}
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <span>🔌 Raspberry Pi 4B Physical Wiring &amp; Header Pin Map</span>
+            </span>
+            <span className="text-[10px] font-black bg-indigo-100 text-indigo-900 border border-indigo-300 px-2.5 py-0.5 rounded-full">
+              40-Pin Header Verification
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs mb-3">
+            <div className="bg-white border rounded-xl p-2.5">
+              <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 1 (Feeder 1)</span>
+              <span className="text-indigo-950 font-black text-sm">Header Pin 22</span>
+              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 25</span>
+            </div>
+            <div className="bg-white border rounded-xl p-2.5">
+              <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 2 (Feeder 2)</span>
+              <span className="text-indigo-950 font-black text-sm">Header Pin 18</span>
+              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 24</span>
+            </div>
+            <div className="bg-white border rounded-xl p-2.5">
+              <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 3 (Feeder 3)</span>
+              <span className="text-indigo-950 font-black text-sm">Header Pin 16</span>
+              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 23</span>
+            </div>
+            <div className="bg-white border rounded-xl p-2.5">
+              <span className="text-slate-500 font-bold block text-[10px] uppercase">Module Power (VCC)</span>
+              <span className="text-rose-950 font-black text-sm">Pin 2 or 4 (+5V)</span>
+              <span className="text-[11px] text-slate-500 block">5V DC Rail</span>
+            </div>
+            <div className="bg-white border rounded-xl p-2.5">
+              <span className="text-slate-500 font-bold block text-[10px] uppercase">Module Ground (GND)</span>
+              <span className="text-slate-950 font-black text-sm">Pin 6 or 14</span>
+              <span className="text-[11px] text-slate-500 block">Common Ground</span>
+            </div>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-950 space-y-1">
+            <div className="font-black text-amber-900">⚠️ Hardware Check If Relays Do Not Click Or LEDs Stay Dark:</div>
+            <div>&bull; <strong>Relay Board PWR LED:</strong> Verify the red power LED on the relay board is ON. If dark, check +5V (Pin 2/4) and GND (Pin 6/14).</div>
+            <div>&bull; <strong>Yellow JD-VCC Jumper:</strong> Multi-channel relay boards require the small yellow jumper shunt placed between <code>JD-VCC</code> and <code>VCC</code> to power the coils.</div>
+            <div>&bull; <strong>Polarity Toggle:</strong> If your relay uses active-high triggering or your load is connected to <strong>NC (Normally Closed)</strong>, click the <strong>&quot;Flip Polarity&quot;</strong> button above.</div>
+            <div>&bull; <strong>Audible Test:</strong> Click the <strong>&quot;⚡ Test Pulse&quot;</strong> button to rapidly drive all 3 channels so you can verify the channel indicator LEDs and hear the physical click.</div>
+          </div>
         </div>
 
         {/* Priority Timing Flow Diagram & Energy Saving Strategy */}

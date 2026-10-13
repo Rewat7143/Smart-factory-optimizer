@@ -374,23 +374,37 @@ def control_relays(cmd: RelayControlPayload):
     }
     pending_relay_commands.append(command_dict)
     
+    act_up = cmd.action.upper()
     # Optimistically update in-memory state for instantaneous UI response
-    if latest_relay_decision and "channels" in latest_relay_decision:
-        chs = latest_relay_decision["channels"]
-        ch_key = str(cmd.channel) if str(cmd.channel) in chs else cmd.channel
-        if cmd.action.upper() in ("SHED", "OFF"):
-            if ch_key in chs:
-                chs[ch_key]["is_shed"] = True
-                chs[ch_key]["state"] = "SHED"
-        elif cmd.action.upper() in ("RESTORE", "ON"):
-            if ch_key in chs:
-                chs[ch_key]["is_shed"] = False
-                chs[ch_key]["state"] = "OPERATIONAL"
-        elif cmd.action.upper() == "EMERGENCY_RESTORE_ALL":
-            for c in chs.values():
-                c["is_shed"] = False
-                c["state"] = "OPERATIONAL"
-            latest_relay_decision["state"] = "NORMAL"
+    if latest_relay_decision:
+        if act_up == "SET_MODE_AUTO":
+            latest_relay_decision["control_mode"] = "AUTO"
+        elif act_up == "SET_MODE_MANUAL":
+            latest_relay_decision["control_mode"] = "MANUAL"
+        elif act_up == "SET_POLARITY_ACTIVE_LOW":
+            latest_relay_decision["active_low"] = True
+        elif act_up == "SET_POLARITY_ACTIVE_HIGH":
+            latest_relay_decision["active_low"] = False
+
+        if "channels" in latest_relay_decision:
+            chs = latest_relay_decision["channels"]
+            ch_key = str(cmd.channel) if str(cmd.channel) in chs else cmd.channel
+            if act_up in ("SHED", "OFF"):
+                latest_relay_decision["control_mode"] = "MANUAL"
+                if ch_key in chs:
+                    chs[ch_key]["is_shed"] = True
+                    chs[ch_key]["state"] = "SHED"
+            elif act_up in ("RESTORE", "ON"):
+                latest_relay_decision["control_mode"] = "MANUAL"
+                if ch_key in chs:
+                    chs[ch_key]["is_shed"] = False
+                    chs[ch_key]["state"] = "OPERATIONAL"
+            elif act_up == "EMERGENCY_RESTORE_ALL":
+                latest_relay_decision["control_mode"] = "MANUAL"
+                for c in chs.values():
+                    c["is_shed"] = False
+                    c["state"] = "OPERATIONAL"
+                latest_relay_decision["state"] = "NORMAL"
 
     return {
         "status": "QUEUED",
