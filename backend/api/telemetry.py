@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 from schemas.energy import EnergyReading, DataSource, DataQuality, MachineState
 from api.google_sheets import gsheets_db
@@ -599,21 +599,30 @@ def run_custom_forecast(payload: CustomHistoryPayload):
 
 
 @router.get("/telemetry/layman_analytics")
-def get_layman_analytics():
-    contract_demand_kw = 100.0
-    safe_operating_kw = 90.0
+def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
+    is_live_mode = bool(mode and mode.upper() == "LIVE")
+
+    # In LIVE toggle: CMD ceiling = 200 VA, safe limit = 140 VA
+    # In SIMULATION toggle: CMD ceiling = 100 kW, safe limit = 90 kW
+    contract_demand_kw = 200.0 if is_live_mode else 100.0
+    safe_operating_kw = 140.0 if is_live_mode else 90.0
+    demand_unit = "VA" if is_live_mode else "kW"
+    power_unit = "W" if is_live_mode else "kW"
+    energy_unit = "Wh" if is_live_mode else "kWh"
+    apparent_energy_unit = "VAh" if is_live_mode else "kVAh"
     
     current_demand_kw = 0.0
     watts_r = 0.0
     watts_y = 0.0
     watts_b = 0.0
+    watts_total = 0.0
+    va_total = 0.0
     pf_avg = 0.95
     freq = 50.0
     v_ln_avg = 230.0
     v_ll_avg = 398.0
     
     if latest_reading:
-        current_demand_kw = round(latest_reading.active_power_kw or 0.0, 2)
         if latest_reading.watts_r is not None: watts_r = latest_reading.watts_r
         if latest_reading.watts_y is not None: watts_y = latest_reading.watts_y
         if latest_reading.watts_b is not None: watts_b = latest_reading.watts_b
@@ -621,18 +630,36 @@ def get_layman_analytics():
         if latest_reading.frequency is not None: freq = round(latest_reading.frequency, 2)
         if latest_reading.v_ln_avg is not None: v_ln_avg = round(latest_reading.v_ln_avg, 1)
         if latest_reading.v_ll_avg is not None: v_ll_avg = round(latest_reading.v_ll_avg, 1)
+        
+        watts_total = float(latest_reading.watts_total or ((latest_reading.active_power_kw or 0.0) * 1000.0))
+        va_total = float(latest_reading.va_total or (watts_total / pf_avg if (watts_total and pf_avg) else 0.0))
+        
+        if is_live_mode:
+            current_demand_kw = round(va_total if va_total > 0 else watts_total, 1)
+        else:
+            current_demand_kw = round(latest_reading.active_power_kw or 0.0, 2)
 
     is_live_meter = bool(latest_reading and latest_reading.data_source == DataSource.RASPBERRY_PI)
     now_local = datetime.now()
     current_hour = now_local.hour
     current_dow = now_local.weekday()
+    today_date_str = now_local.strftime("%d %b")
 
     # Peak demand calculation from real-time cache and authoritative SQLite database
-    cache_pool = [r for r in recent_readings_cache if (not is_live_meter or r.data_source == DataSource.RASPBERRY_PI)]
+    if is_live_mode:
+        cache_pool = [r for r in recent_readings_cache if (r.data_source == DataSource.RASPBERRY_PI and (r.active_power_kw or 0.0) <= 0.25)]
+    else:
+        cache_pool = [r for r in recent_readings_cache if (r.data_source != DataSource.RASPBERRY_PI or (r.active_power_kw or 0.0) >= 5.0)]
+
     if cache_pool:
-        peak_cache_item = max(cache_pool, key=lambda r: (r.active_power_kw or 0.0))
-        peak_cache_val = float(peak_cache_item.active_power_kw or current_demand_kw)
-        peak_cache_time = peak_cache_item.timestamp.strftime("%H:%M")
+        if is_live_mode:
+            peak_cache_val = max([float(r.va_total or (((r.watts_total or 0.0) or ((r.active_power_kw or 0.0) * 1000.0)) / (r.pf_avg or 0.95))) for r in cache_pool], default=current_demand_kw)
+            peak_cache_item = max(cache_pool, key=lambda r: float(r.va_total or (((r.watts_total or 0.0) or ((r.active_power_kw or 0.0) * 1000.0)) / (r.pf_avg or 0.95))))
+            peak_cache_time = peak_cache_item.timestamp.strftime("%H:%M")
+        else:
+            peak_cache_item = max(cache_pool, key=lambda r: (r.active_power_kw or 0.0))
+            peak_cache_val = float(peak_cache_item.active_power_kw or current_demand_kw)
+            peak_cache_time = peak_cache_item.timestamp.strftime("%H:%M")
     else:
         peak_cache_val = current_demand_kw
         peak_cache_time = now_local.strftime("%H:%M")
@@ -644,8 +671,7 @@ def get_layman_analytics():
 
     try:
         with get_connection() as conn:
-            # Query highest active demand recorded today for the active stream
-            src_filter = "data_source = 'RASPBERRY_PI'" if is_live_meter else "1=1"
+            src_filter = "data_source = 'RASPBERRY_PI' AND active_power_kw <= 0.25" if is_live_mode else "(data_source != 'RASPBERRY_PI' OR active_power_kw >= 5.0)"
             row = conn.execute(f"""
                 SELECT active_power_kw, timestamp 
                 FROM telemetry 
@@ -654,7 +680,8 @@ def get_layman_analytics():
                 ORDER BY active_power_kw DESC LIMIT 1
             """).fetchone()
             if row and row["active_power_kw"] is not None:
-                db_peak_val = float(row["active_power_kw"])
+                raw_db_peak = float(row["active_power_kw"])
+                db_peak_val = (raw_db_peak * 1000.0 / pf_avg) if is_live_mode else raw_db_peak
                 try:
                     ts_dt = datetime.fromisoformat(str(row["timestamp"]).replace('Z', '+00:00'))
                     db_peak_time = ts_dt.strftime("%H:%M")
@@ -669,7 +696,9 @@ def get_layman_analytics():
                   AND strftime('%Y-%m', datetime(timestamp, 'localtime')) = strftime('%Y-%m', 'now', 'localtime')
             """).fetchone()
             if m_row and m_row["m_peak"] is not None:
-                month_peak_val = max(float(m_row["m_peak"]), peak_cache_val, current_demand_kw)
+                raw_m_peak = float(m_row["m_peak"])
+                month_peak_val = (raw_m_peak * 1000.0 / pf_avg) if is_live_mode else raw_m_peak
+                month_peak_val = max(month_peak_val, peak_cache_val, current_demand_kw)
 
             # Query today's hourly averages for the actual demand curve
             h_rows = conn.execute(f"""
@@ -683,38 +712,45 @@ def get_layman_analytics():
             """).fetchall()
             for r in h_rows:
                 if r["hr"] is not None and r["avg_kw"] is not None:
-                    db_hourly_map[int(r["hr"])] = round(float(r["avg_kw"]), 2)
+                    avg_kw = float(r["avg_kw"])
+                    val = (avg_kw * 1000.0 / pf_avg) if is_live_mode else avg_kw
+                    db_hourly_map[int(r["hr"])] = round(val, 1 if is_live_mode else 2)
     except Exception as e:
         print(f"Error querying telemetry DB in layman_analytics: {e}")
 
     # Determine peak demand and time
     if db_peak_val > 0.0 and db_peak_val >= peak_cache_val:
-        peak_demand_kw = round(db_peak_val, 2)
+        peak_demand_kw = round(db_peak_val, 1 if is_live_mode else 2)
         today_highest_peak_time = db_peak_time
     else:
-        peak_demand_kw = round(max(peak_cache_val, current_demand_kw), 2)
+        peak_demand_kw = round(max(peak_cache_val, current_demand_kw), 1 if is_live_mode else 2)
         today_highest_peak_time = peak_cache_time
 
+    if is_live_mode:
+        peak_demand_kw = min(contract_demand_kw, peak_demand_kw)
+        month_peak_val = min(contract_demand_kw, month_peak_val)
+
     peak_percent = round((peak_demand_kw / contract_demand_kw) * 100, 1)
-    remaining_buffer_kw = round(max(0.0, contract_demand_kw - peak_demand_kw), 2)
+    remaining_buffer_kw = round(max(0.0, contract_demand_kw - peak_demand_kw), 1 if is_live_mode else 2)
     current_percent = round((current_demand_kw / contract_demand_kw) * 100, 1)
     
     # Status evaluation
     if peak_demand_kw >= safe_operating_kw:
         demand_status = "PENALTY_RISK"
         status_color = "red"
-        status_text = "SURGE RISK: Peak demand near or exceeding contract limit!"
-    elif peak_demand_kw >= 80.0:
+        status_text = f"SURGE RISK: Peak demand near or exceeding {safe_operating_kw} {demand_unit} safe threshold!"
+    elif peak_demand_kw >= (safe_operating_kw * 0.85):
         demand_status = "CAUTION"
         status_color = "amber"
-        status_text = "MODERATE: Demand is approaching safe threshold."
+        status_text = f"MODERATE: Demand is approaching {safe_operating_kw} {demand_unit} safe threshold."
     else:
         demand_status = "SAFE"
         status_color = "emerald"
-        status_text = "OPTIMAL: Operating well within safe contract capacity."
+        status_text = f"OPTIMAL: Operating well within safe capacity ({safe_operating_kw} {demand_unit})."
 
-    # Construct 24-Hour actual curve & forecaster projection
-    hourly_hours = [f"{h:02d}:00" for h in range(24)]
+    # Construct 24-Hour actual curve & forecaster projection WITH REAL DATES
+    hourly_hours = [f"{today_date_str} {h:02d}:00" for h in range(24)]
+    hourly_hours_short = [f"{h:02d}:00" for h in range(24)]
     actual_hourly_kw = []
     base_hourly_kwh = []
     forecast_hourly_kw = []
@@ -722,49 +758,52 @@ def get_layman_analytics():
     for h in range(24):
         if h < current_hour:
             val = db_hourly_map.get(h, current_demand_kw)
-            actual_hourly_kw.append(round(val, 2))
-            base_hourly_kwh.append(round(val, 2))
-            forecast_hourly_kw.append(round(val, 2))
+            actual_hourly_kw.append(round(val, 1 if is_live_mode else 2))
+            base_hourly_kwh.append(round(val, 1 if is_live_mode else 2))
+            forecast_hourly_kw.append(round(val, 1 if is_live_mode else 2))
         elif h == current_hour:
-            actual_hourly_kw.append(round(current_demand_kw, 2))
-            base_hourly_kwh.append(round(current_demand_kw, 2))
-            forecast_hourly_kw.append(round(current_demand_kw, 2))
+            actual_hourly_kw.append(round(current_demand_kw, 1 if is_live_mode else 2))
+            base_hourly_kwh.append(round(current_demand_kw, 1 if is_live_mode else 2))
+            forecast_hourly_kw.append(round(current_demand_kw, 1 if is_live_mode else 2))
         else:
             actual_hourly_kw.append(None)
-            pred_h = forecaster.predict_15m(
-                current_demand=current_demand_kw,
-                lag_demand=current_demand_kw,
+            pred_kw = forecaster.predict_15m(
+                current_demand=(current_demand_kw / 1000.0 * 0.95) if is_live_mode else current_demand_kw,
+                lag_demand=(current_demand_kw / 1000.0 * 0.95) if is_live_mode else current_demand_kw,
                 production_rate=1.0,
                 temp=28.0,
                 hour=h,
                 day_of_week=current_dow
             )
-            base_hourly_kwh.append(round(pred_h, 2))
-            forecast_hourly_kw.append(round(pred_h, 2))
+            pred_val = (pred_kw * 1000.0 / pf_avg) if is_live_mode else pred_kw
+            base_hourly_kwh.append(round(pred_val, 1 if is_live_mode else 2))
+            forecast_hourly_kw.append(round(pred_val, 1 if is_live_mode else 2))
 
     # Calculate predicted crest dynamically from the future forecast
     future_forecasts = [(h, forecast_hourly_kw[h]) for h in range(current_hour, 24) if forecast_hourly_kw[h] is not None]
     if future_forecasts:
         pred_peak_h, pred_peak_val = max(future_forecasts, key=lambda x: x[1])
-        predicted_peak_kw = round(pred_peak_val, 2)
-        predicted_peak_time = f"{pred_peak_h:02d}:00"
+        predicted_peak_kw = round(pred_peak_val, 1 if is_live_mode else 2)
+        predicted_peak_time = f"{today_date_str} {pred_peak_h:02d}:00"
     else:
-        predicted_peak_kw = round(current_demand_kw, 2)
-        predicted_peak_time = f"{current_hour:02d}:00"
+        predicted_peak_kw = round(current_demand_kw, 1 if is_live_mode else 2)
+        predicted_peak_time = f"{today_date_str} {current_hour:02d}:00"
 
-    # Multi-Timeframe Historical Analytics (Weekly / Monthly / Yearly)
-    days_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    # Multi-Timeframe Historical Analytics WITH EXPLICIT DATES (Day, Week, Month, Year)
+    # Week labels with exact calendar dates
+    week_dated_labels = [(now_local - timedelta(days=6-i)).strftime("%d %b (%a)") for i in range(7)]
     weekly_kwh = [0.0] * 7
     weekly_peak = [0.0] * 7
     try:
         with get_connection() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(f"""
                 SELECT 
                     strftime('%w', datetime(timestamp, 'localtime')) as dow_num,
                     AVG(active_power_kw) as avg_kw,
                     MAX(active_power_kw) as max_kw
                 FROM telemetry
                 WHERE datetime(timestamp, 'localtime') >= datetime('now', '-7 days')
+                  AND {src_filter}
                 GROUP BY dow_num
             """).fetchall()
             for r in rows:
@@ -772,8 +811,10 @@ def get_layman_analytics():
                     dow = int(r["dow_num"])
                     idx = (dow - 1) % 7 # 0=Mon, ..., 6=Sun
                     avg_p = float(r["avg_kw"] or 0.0)
-                    weekly_kwh[idx] = round(avg_p * 24.0, 1)
-                    weekly_peak[idx] = round(float(r["max_kw"] or 0.0), 1)
+                    e_val = (avg_p * 24.0 * 1000.0) if is_live_mode else (avg_p * 24.0)
+                    p_val = (float(r["max_kw"] or 0.0) * 1000.0 / pf_avg) if is_live_mode else float(r["max_kw"] or 0.0)
+                    weekly_kwh[idx] = round(e_val, 1)
+                    weekly_peak[idx] = round(p_val, 1)
     except Exception as e:
         print(f"Error querying weekly telemetry: {e}")
 
@@ -781,12 +822,24 @@ def get_layman_analytics():
     weekly_kwh[current_dow] = round(sum(base_hourly_kwh), 1)
     weekly_peak[current_dow] = round(max(peak_demand_kw, predicted_peak_kw), 1)
 
-    month_labels = ["Week 1", "Week 2", "Week 3", "Week 4 (Current)"]
+    # Month labels with dated week ranges
+    w4_end = now_local.strftime("%d %b")
+    w4_start = (now_local - timedelta(days=7)).strftime("%d %b")
+    w3_start = (now_local - timedelta(days=14)).strftime("%d %b")
+    w2_start = (now_local - timedelta(days=21)).strftime("%d %b")
+    w1_start = (now_local - timedelta(days=28)).strftime("%d %b")
+    month_dated_labels = [
+        f"{w1_start}-{w2_start}",
+        f"{w2_start}-{w3_start}",
+        f"{w3_start}-{w4_start}",
+        f"{w4_start}-{w4_end} (Current)"
+    ]
     monthly_kwh = [round(sum(weekly_kwh) * 0.9, 1), round(sum(weekly_kwh) * 0.95, 1), round(sum(weekly_kwh) * 1.05, 1), round(sum(weekly_kwh), 1)]
     monthly_peak = [round(max(weekly_peak), 1), round(max(weekly_peak), 1), round(max(weekly_peak), 1), round(peak_demand_kw, 1)]
 
-    year_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    cur_month_idx = now_local.month - 1
+    # Year labels with Month and Year (e.g. "Nov 2025" ... "Oct 2026")
+    year_dated_labels = [(now_local - timedelta(days=30*(11-i))).strftime("%b %Y") for i in range(12)]
+    cur_month_idx = 11
     yearly_kwh = [0.0] * 12
     yearly_peak = [0.0] * 12
     for m_i in range(12):
@@ -796,10 +849,13 @@ def get_layman_analytics():
     yearly_kwh[cur_month_idx] = round(sum(monthly_kwh), 1)
     yearly_peak[cur_month_idx] = round(month_peak_val, 1)
 
+    # Day labels with date
+    day_dated_labels = hourly_hours
+
     # Concentric circles / Radial rings data
-    phase_r_kw = round(watts_r / 1000.0, 2)
-    phase_y_kw = round(watts_y / 1000.0, 2)
-    phase_b_kw = round(watts_b / 1000.0, 2)
+    phase_r_kw = round((watts_r / 1000.0) if not is_live_mode else watts_r, 2)
+    phase_y_kw = round((watts_y / 1000.0) if not is_live_mode else watts_y, 2)
+    phase_b_kw = round((watts_b / 1000.0) if not is_live_mode else watts_b, 2)
     max_phase_rated_kw = contract_demand_kw / 3.0
 
     radial_rings = [
@@ -828,24 +884,24 @@ def get_layman_analytics():
         "title": "Plant Electrical Health Status",
         "badge": demand_status,
         "summary": (
-            f"The factory is currently running at {current_demand_kw} kW. "
-            f"Your peak usage today touched {peak_demand_kw} kW out of your {contract_demand_kw} kW contract limit. "
-            f"You still have {remaining_buffer_kw} kW of safe power capacity available."
+            f"The equipment is currently running at {current_demand_kw} {demand_unit}. "
+            f"Your peak usage today touched {peak_demand_kw} {demand_unit} out of your {contract_demand_kw} {demand_unit} contract limit. "
+            f"You still have {remaining_buffer_kw} {demand_unit} of safe operating capacity available."
         ),
         "cards": [
             {
                 "icon": "⚡",
                 "title": "Current Usage",
-                "headline": f"{current_demand_kw} kW Active Now",
-                "details": f"Using {current_percent}% of sanctioned power. All 3 phases are balanced and running smoothly."
+                "headline": f"{current_demand_kw} {demand_unit} Active Now",
+                "details": f"Using {current_percent}% of sanctioned power capacity. All 3 phases are balanced and running smoothly."
             },
             {
                 "icon": "🛡️",
                 "title": "Demand Penalty Risk",
-                "headline": f"{remaining_buffer_kw} kW Safe Margin",
+                "headline": f"{remaining_buffer_kw} {demand_unit} Safe Margin",
                 "details": (
-                    f"Peak today was {peak_demand_kw} kW ({peak_percent}% of limit). "
-                    f"You have a comfortable {remaining_buffer_kw} kW buffer before any electricity board penalty."
+                    f"Peak today was {peak_demand_kw} {demand_unit} ({peak_percent}% of limit). "
+                    f"Safe buffer of {remaining_buffer_kw} {demand_unit} before any surcharge penalty."
                 )
             },
             {
@@ -858,7 +914,7 @@ def get_layman_analytics():
                 "icon": "👷",
                 "title": "Shift Technician Advice",
                 "headline": "Safe to operate connected equipment",
-                "details": f"Available buffer is {remaining_buffer_kw} kW. Peak forecast is {predicted_peak_kw} kW."
+                "details": f"Available buffer is {remaining_buffer_kw} {demand_unit}. Peak forecast is {predicted_peak_kw} {demand_unit}."
             }
         ]
     }
@@ -866,8 +922,8 @@ def get_layman_analytics():
     # Cumulative energy & apparent energy calculations
     total_energy_wh = float(latest_reading.energy_wh or 0.0) if latest_reading else 0.0
     total_apparent_energy_vah = float(latest_reading.energy_vah or 0.0) if latest_reading else 0.0
-    total_energy_kwh = round(total_energy_wh / 1000.0, 2)
-    total_apparent_energy_kvah = round(total_apparent_energy_vah / 1000.0, 2)
+    total_energy_kwh = round(total_energy_wh / 1000.0, 3)
+    total_apparent_energy_kvah = round(total_apparent_energy_vah / 1000.0, 3)
 
     curr_total_a = round(latest_reading.current_total or (latest_reading.current_a if latest_reading.current_a else 0.0), 2) if latest_reading else 0.0
     curr_r_a = round(latest_reading.current_r or (curr_total_a / 3.0), 2) if latest_reading else 0.0
@@ -895,24 +951,31 @@ def get_layman_analytics():
     }
 
     # B. Energy Consumption Section
-    today_total_kwh = round(sum(base_hourly_kwh), 2)
+    today_total_energy = round(sum(base_hourly_kwh), 2)
     energy_consumption_data = {
-        "units_today": today_total_kwh,
+        "units_today": today_total_energy,
         "units_this_month": round(sum(monthly_kwh), 1),
         "total_energy_kwh": total_energy_kwh,
         "total_apparent_energy_kvah": total_apparent_energy_kvah,
-        "total_energy_wh": total_energy_wh,
-        "total_apparent_energy_vah": total_apparent_energy_vah,
-        "unit": "kWh"
+        "total_energy_wh": round(total_energy_wh, 1),
+        "total_apparent_energy_vah": round(total_apparent_energy_vah, 1),
+        "unit": energy_unit,
+        "demand_unit": demand_unit
     }
 
     # C. Maximum Demand (CMD) Section
     maximum_demand_data = {
         "current_demand_kw": current_demand_kw,
+        "current_demand_val": current_demand_kw,
         "today_highest_peak_kw": peak_demand_kw,
         "today_highest_peak_time": today_highest_peak_time,
-        "month_highest_peak_kw": round(month_peak_val, 2),
+        "month_highest_peak_kw": round(month_peak_val, 1 if is_live_mode else 2),
         "configured_demand_limit_kw": contract_demand_kw,
+        "safe_operating_limit_kw": safe_operating_kw,
+        "watts_total": round(watts_total, 1),
+        "va_total": round(va_total, 1),
+        "today_highest_peak_w": round(peak_demand_kw * (pf_avg if is_live_mode else 1.0), 1),
+        "month_highest_peak_w": round(month_peak_val * (pf_avg if is_live_mode else 1.0), 1),
         "predicted_peak_kw": predicted_peak_kw,
         "predicted_peak_time": predicted_peak_time,
         "remaining_buffer_kw": remaining_buffer_kw,
@@ -920,7 +983,8 @@ def get_layman_analytics():
         "current_percent": current_percent,
         "peak_risk_status": demand_status,
         "status_color": status_color,
-        "status_text": status_text
+        "status_text": status_text,
+        "unit": demand_unit
     }
 
     # D. Power Quality Section
@@ -950,6 +1014,8 @@ def get_layman_analytics():
     # Actual vs Forecast Demand Chart Data
     actual_vs_forecast_data = {
         "hours": hourly_hours,
+        "hours_short": hourly_hours_short,
+        "date": today_date_str,
         "actual_kw": actual_hourly_kw,
         "forecast_kw": forecast_hourly_kw,
         "cmd_limit_kw": contract_demand_kw,
@@ -957,25 +1023,26 @@ def get_layman_analytics():
         "predicted_peak_kw": predicted_peak_kw,
         "predicted_peak_time": predicted_peak_time,
         "today_peak_kw": peak_demand_kw,
-        "today_peak_time": today_highest_peak_time
+        "today_peak_time": today_highest_peak_time,
+        "unit": demand_unit
     }
 
     # Dynamic Optimization Opportunity
     if predicted_peak_kw >= safe_operating_kw:
-        excess_kw = round(predicted_peak_kw - safe_operating_kw, 1)
-        potential_penalty = int(excess_kw * 450)
+        excess_val = round(predicted_peak_kw - safe_operating_kw, 1)
+        potential_penalty = int(excess_val * (4.5 if is_live_mode else 450))
         optimization_opp = {
-            "title": "Stagger Auxiliary Heavy Machinery Cycles",
-            "suggestion": f"Predicted peak demand of {predicted_peak_kw} kW at {predicted_peak_time} approaches the {safe_operating_kw} kW safe ceiling. Stagger heavy motors and auxiliary loads by 30 minutes to stay within limits.",
-            "potential_savings": f"₹ {potential_penalty:,} avoiding peak demand utility surcharge",
-            "predicted_peak_avoided_kw": excess_kw,
+            "title": "Stagger Heavy Equipment Cycles",
+            "suggestion": f"Predicted peak demand of {predicted_peak_kw} {demand_unit} at {predicted_peak_time} approaches the {safe_operating_kw} {demand_unit} safe operating limit. Stagger auxiliary equipment to stay within limits.",
+            "potential_savings": f"₹ {potential_penalty:,} avoiding peak demand surcharge",
+            "predicted_peak_avoided_kw": excess_val,
             "operator_approval_required": True,
             "status": "AWAITING_OPERATOR_AUTHORIZATION"
         }
     else:
         optimization_opp = {
             "title": "Optimal Load Distribution & Surcharge Protection",
-            "suggestion": f"Real-time factory demand ({current_demand_kw} kW) and 24h AI peak forecast ({predicted_peak_kw} kW @ {predicted_peak_time}) are well within the {contract_demand_kw} kW ceiling. Safe buffer is {remaining_buffer_kw} kW.",
+            "suggestion": f"Operating load ({current_demand_kw} {demand_unit}) and 24h peak forecast ({predicted_peak_kw} {demand_unit} @ {predicted_peak_time}) are well within the {contract_demand_kw} {demand_unit} ceiling. Safe buffer is {remaining_buffer_kw} {demand_unit}.",
             "potential_savings": "₹ 0 (Zero surcharge risk — optimal operation)",
             "predicted_peak_avoided_kw": 0.0,
             "operator_approval_required": False,
@@ -992,6 +1059,7 @@ def get_layman_analytics():
         "description": "Live meter, simulated data, stale data, or offline."
     }
 
+    tariff_rate = 7.50 if not is_live_mode else 0.0075 # ₹7.50 per kWh (= ₹0.0075 per Wh)
     return {
         # Structured Sections B, C, D & Visualizations
         "energy_consumption": energy_consumption_data,
@@ -1001,6 +1069,7 @@ def get_layman_analytics():
         "industrial_statements": industrial_labels,
         "optimization_opportunity": optimization_opp,
         "data_source_status": data_source_info,
+        "mode": "LIVE" if is_live_mode else "SIMULATION",
 
         # Backward compatibility for existing UI
         "contract_demand": {
@@ -1013,48 +1082,53 @@ def get_layman_analytics():
             "remaining_buffer_kw": remaining_buffer_kw,
             "status": demand_status,
             "status_color": status_color,
-            "status_text": status_text
+            "status_text": status_text,
+            "unit": demand_unit
         },
         "radial_rings": radial_rings,
         "timeframes": {
             "day": {
-                "labels": hourly_hours,
+                "labels": day_dated_labels,
                 "values": base_hourly_kwh,
-                "unit": "kWh",
+                "unit": energy_unit,
+                "demand_unit": demand_unit,
                 "total": round(sum(base_hourly_kwh), 2),
                 "peak": round(max(base_hourly_kwh), 2),
                 "avg": round(sum(base_hourly_kwh) / len(base_hourly_kwh), 2),
-                "cost_inr": round(sum(base_hourly_kwh) * 7.5, 0)
+                "cost_inr": round(sum(base_hourly_kwh) * tariff_rate, 0)
             },
             "week": {
-                "labels": days_labels,
+                "labels": week_dated_labels,
                 "values": weekly_kwh,
                 "peaks": weekly_peak,
-                "unit": "kWh",
+                "unit": energy_unit,
+                "demand_unit": demand_unit,
                 "total": round(sum(weekly_kwh), 1),
                 "peak": round(max(weekly_peak), 1),
                 "avg": round(sum(weekly_kwh) / len(weekly_kwh), 1),
-                "cost_inr": round(sum(weekly_kwh) * 7.5, 0)
+                "cost_inr": round(sum(weekly_kwh) * tariff_rate, 0)
             },
             "month": {
-                "labels": month_labels,
+                "labels": month_dated_labels,
                 "values": monthly_kwh,
                 "peaks": monthly_peak,
-                "unit": "kWh",
+                "unit": energy_unit,
+                "demand_unit": demand_unit,
                 "total": round(sum(monthly_kwh), 1),
                 "peak": round(max(monthly_peak), 1),
                 "avg": round(sum(monthly_kwh) / len(monthly_kwh), 1),
-                "cost_inr": round(sum(monthly_kwh) * 7.5, 0)
+                "cost_inr": round(sum(monthly_kwh) * tariff_rate, 0)
             },
             "year": {
-                "labels": year_labels,
+                "labels": year_dated_labels,
                 "values": yearly_kwh,
                 "peaks": yearly_peak,
-                "unit": "kWh",
+                "unit": energy_unit,
+                "demand_unit": demand_unit,
                 "total": round(sum(yearly_kwh), 1),
                 "peak": round(max(yearly_peak), 1),
                 "avg": round(sum(yearly_kwh) / len(yearly_kwh), 1),
-                "cost_inr": round(sum(yearly_kwh) * 7.5, 0)
+                "cost_inr": round(sum(yearly_kwh) * tariff_rate, 0)
             }
         },
         "ai_explanation": explanation

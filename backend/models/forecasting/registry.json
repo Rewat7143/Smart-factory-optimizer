@@ -34,7 +34,7 @@
             "is_weekend": 0.0
         },
         "artifact_path": "models/forecasting/xgboost_steel_v1.joblib",
-        "created_at": "2026-10-14T01:19:24.635691",
+        "created_at": "2026-10-14T01:54:28.858090",
         "status": "VALIDATED"
     }
 }

@@ -2,8 +2,11 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import ReactECharts from 'echarts-for-react'
+import { useGlobalState } from '@/components/GlobalState'
 
 export default function DemandForecastPage() {
+  const { mode } = useGlobalState()
+  const isLive = mode === 'LIVE'
   const [analytics, setAnalytics] = useState<any>(null)
   const [selectedTimeframe, setSelectedTimeframe] = useState<'day' | 'week' | 'month' | 'year'>('day')
   const [optimizationApproved, setOptimizationApproved] = useState<boolean>(false)
@@ -16,7 +19,7 @@ export default function DemandForecastPage() {
           typeof window !== 'undefined'
             ? `${window.location.protocol}//${window.location.hostname}:8000/api`
             : 'http://localhost:8000/api'
-        const res = await fetch(`${baseUrl}/telemetry/layman_analytics`)
+        const res = await fetch(`${baseUrl}/telemetry/layman_analytics?mode=${mode}`)
         if (res.ok) {
           const data = await res.json()
           if (isMounted) setAnalytics(data)
@@ -32,11 +35,86 @@ export default function DemandForecastPage() {
       isMounted = false
       clearInterval(timer)
     }
-  }, [])
+  }, [mode])
 
   // Telemetry fallback defaults
   const data = useMemo(() => {
     if (analytics) return analytics
+
+    if (isLive) {
+      return {
+        maximum_demand: {
+          current_demand_kw: 198.5,
+          today_highest_peak_kw: 198.5,
+          month_highest_peak_kw: 198.5,
+          configured_demand_limit_kw: 200.0,
+          safe_operating_limit_kw: 140.0,
+          predicted_peak_kw: 198.5,
+          predicted_peak_time: '--:--',
+          remaining_buffer_kw: 1.5,
+          unit: 'VA',
+        },
+        actual_vs_forecast: {
+          hours: [
+            '14 Oct 00:00', '14 Oct 01:00', '14 Oct 02:00', '14 Oct 03:00', '14 Oct 04:00', '14 Oct 05:00',
+            '14 Oct 06:00', '14 Oct 07:00', '14 Oct 08:00', '14 Oct 09:00', '14 Oct 10:00', '14 Oct 11:00',
+            '14 Oct 12:00', '14 Oct 13:00', '14 Oct 14:00', '14 Oct 15:00', '14 Oct 16:00', '14 Oct 17:00',
+            '14 Oct 18:00', '14 Oct 19:00', '14 Oct 20:00', '14 Oct 21:00', '14 Oct 22:00', '14 Oct 23:00',
+          ],
+          actual_kw: Array(24).fill(null),
+          forecast_kw: Array(24).fill(0.0),
+          cmd_limit_kw: 200.0,
+          safe_limit_kw: 140.0,
+          predicted_peak_kw: 198.5,
+          predicted_peak_time: '--:--',
+          unit: 'VA',
+        },
+        timeframes: {
+          day: {
+            labels: ['14 Oct 00:00', '14 Oct 04:00', '14 Oct 08:00', '14 Oct 12:00', '14 Oct 16:00', '14 Oct 20:00'],
+            values: [0, 0, 0, 0, 0, 0],
+            peaks: [0, 0, 0, 0, 0, 0],
+            peak: 0.0,
+            total: 0.0,
+            unit: 'Wh',
+            demand_unit: 'VA',
+          },
+          week: {
+            labels: ['08 Oct (Thu)', '09 Oct (Fri)', '10 Oct (Sat)', '11 Oct (Sun)', '12 Oct (Mon)', '13 Oct (Tue)', '14 Oct (Wed)'],
+            values: [0, 0, 0, 0, 0, 0, 0],
+            peaks: [0, 0, 0, 0, 0, 0, 0],
+            peak: 0.0,
+            total: 0.0,
+            unit: 'Wh',
+            demand_unit: 'VA',
+          },
+          month: {
+            labels: ['16-22 Sep', '23-29 Sep', '30 Sep-06 Oct', '07-14 Oct (Current)'],
+            values: [0, 0, 0, 0],
+            peaks: [0, 0, 0, 0],
+            peak: 0.0,
+            total: 0.0,
+            unit: 'Wh',
+            demand_unit: 'VA',
+          },
+          year: {
+            labels: ['Nov 2025', 'Dec 2025', 'Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026', 'Oct 2026'],
+            values: Array(12).fill(0),
+            peaks: Array(12).fill(0),
+            peak: 0.0,
+            total: 0.0,
+            unit: 'Wh',
+            demand_unit: 'VA',
+          },
+        },
+        optimization_opportunity: {
+          title: 'Optimal Load Distribution & Surcharge Protection',
+          suggestion: 'Operating load and 24h peak forecast are well within the 200 VA ceiling.',
+          potential_savings: '₹ 0 (Zero surcharge risk — optimal operation)',
+          predicted_peak_avoided_kw: 0.0,
+        },
+      }
+    }
 
     return {
       maximum_demand: {
@@ -101,7 +179,7 @@ export default function DemandForecastPage() {
         predicted_peak_avoided_kw: 0.0,
       },
     }
-  }, [analytics])
+  }, [analytics, isLive])
 
   const md = data.maximum_demand || {}
   const af = data.actual_vs_forecast || {}
@@ -109,21 +187,25 @@ export default function DemandForecastPage() {
   const opp = data.optimization_opportunity || {}
   const pq = data.power_quality || {}
 
+  const demandUnit = isLive ? 'VA' : 'kW'
+  const energyUnit = isLive ? 'Wh' : 'kWh'
+
   const currentDemand = Number(md.current_demand_kw ?? 0.0)
   const peakDemand = Number(md.today_highest_peak_kw ?? currentDemand)
-  const contractLimit = Number(md.configured_demand_limit_kw ?? 100.0)
-  const safeLimit = Number(af.safe_limit_kw ?? 90.0)
+  const contractLimit = isLive ? 200.0 : Number(md.configured_demand_limit_kw ?? 100.0)
+  const safeLimit = isLive ? 140.0 : Number(af.safe_limit_kw ?? 90.0)
   const predictedPeak = Number(af.predicted_peak_kw ?? currentDemand)
   const predictedPeakTime = String(af.predicted_peak_time || '--:--')
   const currentPf = Number(pq.current_power_factor ?? 0.95)
 
   // Dynamic Y-axis max for sub-kilowatt bench testing vs industrial scale
   const yAxisMax24h = useMemo(() => {
+    if (isLive) return 220
     const maxVal = Math.max(currentDemand, peakDemand, predictedPeak)
     if (maxVal < 1.0) return 1.0
     if (maxVal < 5.0) return Math.ceil(maxVal * 2.0)
     return Math.max(110, Math.ceil(maxVal * 1.15))
-  }, [currentDemand, peakDemand, predictedPeak])
+  }, [isLive, currentDemand, peakDemand, predictedPeak])
 
   // ECharts 1: 24-Hour Actual vs AI Predicted Demand Curve
   const chartOptions24h = useMemo(() => {
@@ -140,12 +222,12 @@ export default function DemandForecastPage() {
         borderColor: '#334155',
         textStyle: { color: '#ffffff', fontSize: 12, fontWeight: 'bold' },
         formatter: (params: any[]) => {
-          let html = `<div class="font-black text-xs pb-1 mb-1 border-b border-slate-700">${params[0]?.axisValue} Hours</div>`
+          let html = `<div class="font-black text-xs pb-1 mb-1 border-b border-slate-700">${params[0]?.axisValue}</div>`
           params.forEach((p) => {
             if (p.value !== null && p.value !== undefined) {
               html += `<div class="flex items-center justify-between gap-4 py-0.5">
                 <span style="color:${p.color}">● ${p.seriesName}:</span>
-                <span class="font-black">${Number(p.value).toFixed(1)} kW</span>
+                <span class="font-black">${Number(p.value).toFixed(1)} ${demandUnit}</span>
               </div>`
             }
           })
@@ -153,10 +235,11 @@ export default function DemandForecastPage() {
         },
       },
       legend: {
-        data:
-          yAxisMax24h >= 100
-            ? ['Actual Measured Demand', 'AI Forecast Demand', 'Safe Operating Limit (90 kW)', 'Contract Ceiling (100 kW)']
-            : ['Actual Measured Demand', 'AI Forecast Demand'],
+        data: isLive
+          ? ['Actual Measured Demand', 'AI Forecast Demand', 'Safe Operating Limit (140 VA)', 'Contract Ceiling (200 VA)']
+          : (yAxisMax24h >= 100
+              ? ['Actual Measured Demand', 'AI Forecast Demand', 'Safe Operating Limit (90 kW)', 'Contract Ceiling (100 kW)']
+              : ['Actual Measured Demand', 'AI Forecast Demand']),
         top: 8,
         textStyle: { fontWeight: 'bold', fontSize: 11, color: '#1e293b' },
       },
@@ -176,7 +259,7 @@ export default function DemandForecastPage() {
       },
       yAxis: {
         type: 'value',
-        name: 'Demand (kW)',
+        name: `Demand (${demandUnit})`,
         nameTextStyle: { fontWeight: 'bold', color: '#1e293b', fontSize: 12 },
         min: 0,
         max: yAxisMax24h,
@@ -221,17 +304,20 @@ export default function DemandForecastPage() {
             silent: true,
             data: [
               {
-                coord: [predictedPeakTime.split(':')[0] + ':00', predictedPeak],
-                value: `Crest: ${predictedPeak.toFixed(2)} kW`,
+                coord: [
+                  hours.find((h: string) => h.includes(predictedPeakTime.slice(-5))) || hours[Math.min(14, hours.length - 1)] || '14:00',
+                  predictedPeak,
+                ],
+                value: `Crest: ${predictedPeak.toFixed(1)} ${demandUnit}`,
                 itemStyle: { color: '#e11d48' },
               },
             ],
           },
         },
-        ...(yAxisMax24h >= 100
+        ...(isLive || yAxisMax24h >= 100
           ? [
               {
-                name: 'Safe Operating Limit (90 kW)',
+                name: isLive ? 'Safe Operating Limit (140 VA)' : 'Safe Operating Limit (90 kW)',
                 type: 'line',
                 data: Array(hours.length).fill(safeLimit),
                 silent: true,
@@ -240,7 +326,7 @@ export default function DemandForecastPage() {
                 symbol: 'none',
               },
               {
-                name: 'Contract Ceiling (100 kW)',
+                name: isLive ? 'Contract Ceiling (200 VA)' : 'Contract Ceiling (100 kW)',
                 type: 'line',
                 data: Array(hours.length).fill(contractLimit),
                 silent: true,
@@ -252,7 +338,7 @@ export default function DemandForecastPage() {
           : []),
       ],
     }
-  }, [af, safeLimit, contractLimit, predictedPeak, predictedPeakTime, yAxisMax24h])
+  }, [af, isLive, demandUnit, safeLimit, contractLimit, predictedPeak, predictedPeakTime, yAxisMax24h])
 
   // ECharts 2: Multi-Timeframe Historical Analysis
   const chartOptionsTimeframe = useMemo(() => {
@@ -267,9 +353,22 @@ export default function DemandForecastPage() {
         axisPointer: { type: 'shadow' },
         backgroundColor: '#0f172a',
         textStyle: { color: '#ffffff', fontWeight: 'bold' },
+        formatter: (params: any[]) => {
+          let html = `<div class="font-black text-xs pb-1 mb-1 border-b border-slate-700">${params[0]?.axisValue}</div>`
+          params.forEach((p) => {
+            if (p.value !== null && p.value !== undefined) {
+              const u = p.seriesName.includes('Peak') ? demandUnit : energyUnit
+              html += `<div class="flex items-center justify-between gap-4 py-0.5">
+                <span style="color:${p.color}">● ${p.seriesName}:</span>
+                <span class="font-black">${Number(p.value).toLocaleString()} ${u}</span>
+              </div>`
+            }
+          })
+          return html
+        },
       },
       legend: {
-        data: ['Energy (kWh)', 'Peak Demand (kW)'],
+        data: [`Energy (${energyUnit})`, `Peak Demand (${demandUnit})`],
         top: 4,
         textStyle: { fontWeight: 'bold', color: '#334155' },
       },
@@ -282,28 +381,28 @@ export default function DemandForecastPage() {
       yAxis: [
         {
           type: 'value',
-          name: 'kWh',
+          name: energyUnit,
           axisLabel: { fontWeight: 'bold', color: '#334155' },
           splitLine: { lineStyle: { color: '#f1f5f9' } },
         },
         {
           type: 'value',
-          name: 'Peak kW',
+          name: `Peak ${demandUnit}`,
           min: 0,
-          max: peaks && Math.max(...peaks.map(Number), 0) < 5.0 ? 2.0 : 120,
+          max: isLive ? 220 : (peaks && Math.max(...peaks.map(Number), 0) < 5.0 ? 2.0 : 120),
           axisLabel: { fontWeight: 'bold', color: '#334155' },
           splitLine: { show: false },
         },
       ],
       series: [
         {
-          name: 'Energy (kWh)',
+          name: `Energy (${energyUnit})`,
           type: 'bar',
           data: values,
           itemStyle: { color: '#818cf8', borderRadius: [6, 6, 0, 0] },
         },
         {
-          name: 'Peak Demand (kW)',
+          name: `Peak Demand (${demandUnit})`,
           type: 'line',
           yAxisIndex: 1,
           data: peaks,
@@ -314,7 +413,7 @@ export default function DemandForecastPage() {
         },
       ],
     }
-  }, [tf, selectedTimeframe])
+  }, [tf, selectedTimeframe, isLive, demandUnit, energyUnit])
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6 font-mono text-slate-800 pb-20 p-6">
@@ -354,7 +453,7 @@ export default function DemandForecastPage() {
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="text-[11px] font-black uppercase text-slate-600 tracking-wider">Current Demand</div>
           <div className="text-2xl font-black text-slate-950 mt-1">
-            {currentDemand.toFixed(2)} <span className="text-xs font-bold text-slate-600">kW</span>
+            {currentDemand.toFixed(isLive ? 1 : 2)} <span className="text-xs font-bold text-slate-600">{demandUnit}</span>
           </div>
           <div className="text-[11px] font-bold text-slate-500 mt-0.5">
             {((currentDemand / contractLimit) * 100).toFixed(1)}% of ceiling
@@ -365,7 +464,7 @@ export default function DemandForecastPage() {
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="text-[11px] font-black uppercase text-slate-600 tracking-wider">Today Highest Peak</div>
           <div className="text-2xl font-black text-rose-700 mt-1">
-            {peakDemand.toFixed(2)} <span className="text-xs font-bold text-slate-600">kW</span>
+            {peakDemand.toFixed(isLive ? 1 : 2)} <span className="text-xs font-bold text-slate-600">{demandUnit}</span>
           </div>
           <div className="text-[11px] font-bold text-slate-500 mt-0.5">
             {md.today_highest_peak_time ? `Recorded at ${md.today_highest_peak_time}` : 'Live Monitoring'}
@@ -376,7 +475,7 @@ export default function DemandForecastPage() {
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="text-[11px] font-black uppercase text-indigo-700 tracking-wider">AI Forecast Peak</div>
           <div className="text-2xl font-black text-indigo-950 mt-1">
-            {predictedPeak.toFixed(2)} <span className="text-xs font-bold text-slate-600">kW</span>
+            {predictedPeak.toFixed(isLive ? 1 : 2)} <span className="text-xs font-bold text-slate-600">{demandUnit}</span>
           </div>
           <div className="text-[11px] font-bold text-indigo-800 mt-0.5">Expected at {predictedPeakTime}</div>
         </div>
@@ -385,8 +484,8 @@ export default function DemandForecastPage() {
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="text-[11px] font-black uppercase text-emerald-700 tracking-wider">Safe Operating Buffer</div>
           <div className="text-2xl font-black text-emerald-800 mt-1">
-            {Math.max(0, contractLimit - Math.max(currentDemand, peakDemand)).toFixed(2)}{' '}
-            <span className="text-xs font-bold text-slate-600">kW</span>
+            {Math.max(0, contractLimit - Math.max(currentDemand, peakDemand)).toFixed(isLive ? 1 : 2)}{' '}
+            <span className="text-xs font-bold text-slate-600">{demandUnit}</span>
           </div>
           <div className="text-[11px] font-bold text-emerald-700 mt-0.5">Safe margin before penalty</div>
         </div>
@@ -395,9 +494,11 @@ export default function DemandForecastPage() {
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 shadow-sm col-span-2 md:col-span-1">
           <div className="text-[11px] font-black uppercase text-slate-600 tracking-wider">Contracted Ceiling</div>
           <div className="text-2xl font-black text-slate-900 mt-1">
-            {contractLimit.toFixed(0)} <span className="text-xs font-bold text-slate-600">kW</span>
+            {contractLimit.toFixed(0)} <span className="text-xs font-bold text-slate-600">{demandUnit}</span>
           </div>
-          <div className="text-[11px] font-bold text-rose-700 mt-0.5">HT Utility Sanctioned Limit</div>
+          <div className="text-[11px] font-bold text-rose-700 mt-0.5">
+            {isLive ? 'Hardware Bench Limit (200 VA)' : 'HT Utility Sanctioned Limit'}
+          </div>
         </div>
       </div>
 
@@ -416,7 +517,7 @@ export default function DemandForecastPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-black bg-indigo-50 border border-indigo-200 text-indigo-900 px-3 py-1 rounded-lg">
-              Predicted Crest: {predictedPeak.toFixed(2)} kW @ {predictedPeakTime}
+              Predicted Crest: {predictedPeak.toFixed(1)} {demandUnit} @ {predictedPeakTime}
             </span>
           </div>
         </div>
@@ -468,9 +569,9 @@ export default function DemandForecastPage() {
           </div>
 
           <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs font-black text-slate-700">
-            <span>Period Total: {(tf[selectedTimeframe]?.total || 0).toLocaleString()} kWh</span>
-            <span>Period Peak: {(tf[selectedTimeframe]?.peak || 0)} kW</span>
-            <span>Est. Cost: ₹ {Math.round((tf[selectedTimeframe]?.total || 0) * 7.5).toLocaleString()}</span>
+            <span>Period Total: {(tf[selectedTimeframe]?.total || 0).toLocaleString()} {energyUnit}</span>
+            <span>Period Peak: {(tf[selectedTimeframe]?.peak || 0)} {demandUnit}</span>
+            <span>Est. Cost: ₹ {Math.round(isLive ? (tf[selectedTimeframe]?.cost_inr ?? ((tf[selectedTimeframe]?.total || 0) * 0.0075)) : ((tf[selectedTimeframe]?.total || 0) * 7.5)).toLocaleString()}</span>
           </div>
         </div>
 
@@ -498,14 +599,14 @@ export default function DemandForecastPage() {
 
             <p className="text-xs font-bold text-slate-700 leading-relaxed mb-4">
               {opp.suggestion ||
-                `Real-time factory demand (${currentDemand.toFixed(2)} kW) and 24h AI peak forecast (${predictedPeak.toFixed(2)} kW @ ${predictedPeakTime}) are within sanctioned limits.`}
+                `Operating load (${currentDemand.toFixed(1)} ${demandUnit}) and 24h AI peak forecast (${predictedPeak.toFixed(1)} ${demandUnit} @ ${predictedPeakTime}) are within sanctioned limits.`}
             </p>
 
             <div className="space-y-3 bg-white border border-indigo-100 rounded-2xl p-4 shadow-2xs">
               <div className="flex items-center justify-between text-xs font-black text-slate-700">
                 <span>Predicted Peak Avoided:</span>
                 <span className="text-emerald-700 text-sm font-black">
-                  {opp.predicted_peak_avoided_kw ? `-${opp.predicted_peak_avoided_kw} kW` : '0.0 kW (Within limit)'}
+                  {opp.predicted_peak_avoided_kw ? `-${opp.predicted_peak_avoided_kw} ${demandUnit}` : `0.0 ${demandUnit} (Within limit)`}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs font-black text-slate-700">

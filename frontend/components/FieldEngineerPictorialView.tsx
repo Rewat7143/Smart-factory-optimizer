@@ -1,5 +1,6 @@
 "use client"
 import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { useGlobalState } from './GlobalState'
 
 // ============================================================================
 // SMOOTH 60FPS VALUE INTERPOLATION HOOK (Nice Analog Gauge Response)
@@ -238,6 +239,8 @@ function SpeedometerGauge({
 // High-standard, tightly-fitted 6-widget industrial dashboard + Economics Summary
 // ============================================================================
 export default function FieldEngineerPictorialView() {
+  const { mode } = useGlobalState()
+  const isLive = mode === 'LIVE'
   const [analytics, setAnalytics] = useState<any>(null)
 
   useEffect(() => {
@@ -245,7 +248,7 @@ export default function FieldEngineerPictorialView() {
     const fetchAnalytics = async () => {
       try {
         const baseUrl = (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000/api` : 'http://localhost:8000/api')
-        const res = await fetch(`${baseUrl}/telemetry/layman_analytics`)
+        const res = await fetch(`${baseUrl}/telemetry/layman_analytics?mode=${mode}`)
         if (res.ok) {
           const data = await res.json()
           if (isMounted) setAnalytics(data)
@@ -261,11 +264,40 @@ export default function FieldEngineerPictorialView() {
       isMounted = false
       clearInterval(timer)
     }
-  }, [])
+  }, [mode])
 
   // Live telemetry stream fallback
   const data = useMemo(() => {
     if (analytics) return analytics
+
+    if (isLive) {
+      return {
+        energy_consumption: {
+          units_today: 184.5,
+          units_this_month: 4200.0,
+          total_energy_kwh: 175.131,
+          total_apparent_energy_kvah: 193.873,
+          total_energy_wh: 175131.3,
+          total_apparent_energy_vah: 193873.1,
+        },
+        maximum_demand: {
+          current_demand_kw: 198.5,
+          watts_total: 195.0,
+          va_total: 198.5,
+          today_highest_peak_kw: 198.5,
+          month_highest_peak_kw: 198.5,
+          today_highest_peak_w: 195.0,
+          month_highest_peak_w: 195.0,
+          configured_demand_limit_kw: 200.0,
+          safe_operating_limit_kw: 140.0,
+        },
+        power_quality: {
+          current_power_factor: 0.98,
+          today_power_factor: 0.98,
+          monthly_power_factor: 0.97,
+        }
+      }
+    }
 
     return {
       energy_consumption: {
@@ -286,31 +318,49 @@ export default function FieldEngineerPictorialView() {
         monthly_power_factor: 0.948,
       }
     }
-  }, [analytics])
+  }, [analytics, isLive])
 
   const ec = data.energy_consumption || {}
   const md = data.maximum_demand || {}
   const pq = data.power_quality || {}
 
+  const pfCurrent = Number(pq.current_power_factor ?? 0.95)
+  const todayPf = Number(pq.today_power_factor ?? pfCurrent)
+  const monthPf = Number(pq.monthly_power_factor ?? pfCurrent)
+
+  // Simulation mode values (kW, kVA, kWh, kVAh)
   const powerKw = Number(md.current_demand_kw ?? 0.0)
-  const powerKva = Number(powerKw > 0 ? (powerKw / (pq.current_power_factor || 0.95)) : 0.0)
+  const powerKva = Number(powerKw > 0 ? (powerKw / (pfCurrent || 0.95)) : 0.0)
   const energyKwh = Number(ec.total_energy_kwh ?? 0.0)
   const energyKvah = Number(ec.total_apparent_energy_kvah ?? 0.0)
-  const pfCurrent = Number(pq.current_power_factor ?? 0.0)
+
+  // Live mode values (W, VA, Wh, VAh)
+  const powerWatts = Number(md.watts_total ?? (isLive ? (powerKw > 0 ? (powerKw < 5 ? powerKw * 1000 : powerKw) : 195.0) : (powerKw * 1000)))
+  const powerVa = Number(md.va_total ?? (isLive ? (md.current_demand_kw ?? (powerWatts / (pfCurrent || 0.95))) : powerKva))
+  const energyWh = Number(ec.total_energy_wh ?? (energyKwh * 1000))
+  const energyVah = Number(ec.total_apparent_energy_vah ?? (energyKvah * 1000))
 
   const unitsToday = Number(ec.units_today ?? 0.0)
   const unitsMonth = Number(ec.units_this_month ?? 0.0)
 
-  const cmdPeakToday = Number(md.today_highest_peak_kw ?? powerKw)
-  const cmdPeakMonth = Number(md.month_highest_peak_kw ?? powerKw)
+  const cmdPeakToday = isLive
+    ? Number(md.today_highest_peak_kw ?? powerVa)
+    : Number(md.today_highest_peak_kw ?? powerKw)
+  const cmdPeakMonth = isLive
+    ? Number(md.month_highest_peak_kw ?? powerVa)
+    : Number(md.month_highest_peak_kw ?? powerKw)
 
-  const todayPf = Number(pq.today_power_factor ?? pfCurrent)
-  const monthPf = Number(pq.monthly_power_factor ?? pfCurrent)
+  const powerPeakToday = isLive
+    ? Number(md.today_highest_peak_w ?? (cmdPeakToday * pfCurrent))
+    : Number(md.today_highest_peak_kw || 76.5)
+  const powerPeakMonth = isLive
+    ? Number(md.month_highest_peak_w ?? (cmdPeakMonth * pfCurrent))
+    : Number(md.month_highest_peak_kw || 85.2)
 
-  // Useful commercial tariff calculations (₹7.50 / kWh standard HT-2A tariff)
-  const TARIFF_PER_KWH = 7.50
-  const costToday = Math.round(unitsToday * TARIFF_PER_KWH)
-  const costMonth = Math.round(unitsMonth * TARIFF_PER_KWH)
+  // Useful commercial tariff calculations (₹7.50 / kWh standard HT-2A tariff, ₹0.0075 / Wh in live)
+  const TARIFF_RATE = isLive ? 0.0075 : 7.50
+  const costToday = Math.round(unitsToday * TARIFF_RATE)
+  const costMonth = Math.round(unitsMonth * TARIFF_RATE)
 
   return (
     <div className="space-y-6 text-slate-800">
@@ -327,11 +377,11 @@ export default function FieldEngineerPictorialView() {
             {/* Table Header Row (High Contrast) */}
             <div className="grid grid-cols-6 gap-2 md:gap-3 text-center text-xs md:text-sm font-black text-indigo-950 pb-3 border-b-2 border-indigo-950/20">
               <div className="flex items-center justify-center">PCC</div>
-              <div>Power<br/><span className="text-[11px] font-extrabold text-indigo-900">(kW)</span></div>
-              <div>Energy<br/><span className="text-[11px] font-extrabold text-indigo-900">(kWh)</span></div>
-              <div className="flex items-center justify-center">kVA</div>
+              <div>Power<br/><span className="text-[11px] font-extrabold text-indigo-900">({isLive ? 'W' : 'kW'})</span></div>
+              <div>Energy<br/><span className="text-[11px] font-extrabold text-indigo-900">({isLive ? 'Wh' : 'kWh'})</span></div>
+              <div className="flex items-center justify-center">{isLive ? 'VA' : 'kVA'}</div>
               <div>Power<br/>Factor</div>
-              <div className="flex items-center justify-center">kVAh</div>
+              <div className="flex items-center justify-center">{isLive ? 'VAh' : 'kVAh'}</div>
             </div>
 
             {/* Row 1: PCC1 (Live Incomer Stream) */}
@@ -343,17 +393,19 @@ export default function FieldEngineerPictorialView() {
               </div>
               <div>
                 <span className="bg-white text-slate-950 font-black text-xs md:text-sm py-2 px-1 rounded-full inline-block w-full shadow-xs">
-                  {powerKw.toFixed(2)}
+                  {isLive ? powerWatts.toFixed(1) : powerKw.toFixed(2)}
                 </span>
               </div>
               <div>
                 <span className="bg-white text-slate-950 font-black text-xs md:text-sm py-2 px-1 rounded-full inline-block w-full shadow-xs truncate">
-                  {energyKwh.toFixed(1)}
+                  {isLive
+                    ? energyWh.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+                    : energyKwh.toFixed(1)}
                 </span>
               </div>
               <div>
                 <span className="bg-white text-slate-950 font-black text-xs md:text-sm py-2 px-1 rounded-full inline-block w-full shadow-xs">
-                  {powerKva.toFixed(2)}
+                  {isLive ? powerVa.toFixed(1) : powerKva.toFixed(2)}
                 </span>
               </div>
               <div>
@@ -363,7 +415,9 @@ export default function FieldEngineerPictorialView() {
               </div>
               <div>
                 <span className="bg-white text-slate-950 font-black text-xs md:text-sm py-2 px-1 rounded-full inline-block w-full shadow-xs truncate">
-                  {energyKvah.toFixed(1)}
+                  {isLive
+                    ? energyVah.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+                    : energyKvah.toFixed(1)}
                 </span>
               </div>
             </div>
@@ -450,14 +504,14 @@ export default function FieldEngineerPictorialView() {
         <div className="lg:col-span-3 bg-white rounded-3xl p-6 shadow-sm border-2 border-slate-200 flex flex-col justify-between">
           <div>
             <h3 className="text-base md:text-lg font-black text-slate-900 text-center mb-4">
-              Energy Consumption
+              Energy Consumption {isLive ? '(Wh)' : ''}
             </h3>
 
             <div className="space-y-4">
               {/* Units Consumed Today */}
               <div className="text-center">
                 <div className="text-xs md:text-sm font-black text-slate-800 mb-1.5">
-                  Units Consumed Today
+                  {isLive ? 'Wh Consumed Today' : 'Units Consumed Today'}
                 </div>
                 <div className="w-full bg-[#949be8] hover:bg-[#858de2] transition-colors text-white font-black text-2xl lg:text-3xl py-3.5 px-6 rounded-full text-center shadow-md tracking-tight">
                   {unitsToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
@@ -470,7 +524,7 @@ export default function FieldEngineerPictorialView() {
               {/* Units Consumed This Month */}
               <div className="text-center">
                 <div className="text-xs md:text-sm font-black text-slate-800 mb-1.5">
-                  Units Consumed This Month
+                  {isLive ? 'Wh Consumed This Month' : 'Units Consumed This Month'}
                 </div>
                 <div className="w-full bg-[#949be8] hover:bg-[#858de2] transition-colors text-white font-black text-2xl lg:text-3xl py-3.5 px-6 rounded-full text-center shadow-md tracking-tight">
                   {unitsMonth.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
@@ -483,20 +537,20 @@ export default function FieldEngineerPictorialView() {
           </div>
 
           <div className="bg-indigo-50 border border-indigo-200 text-indigo-950 font-bold text-xs py-2 px-3 rounded-xl text-center mt-4">
-            Active Billing Cycle: Month 10 &bull; HT-2A Tariff
+            Active Billing Cycle: Month 10 &bull; {isLive ? 'Low-Voltage Bench Tariff' : 'HT-2A Tariff'}
           </div>
         </div>
 
         {/* 3. CMD BIG SPEEDOMETER GAUGE WITH ARROW 1 (Top Right - 3 cols) */}
         <div className="lg:col-span-3 bg-white rounded-3xl p-6 shadow-sm border-2 border-slate-200 flex flex-col items-center justify-between text-center">
           <h3 className="text-base md:text-lg font-black text-slate-900 text-center mb-1">
-            CMD
+            CMD {isLive && <span className="text-xs text-indigo-600 font-extrabold">(200 VA Ceiling)</span>}
           </h3>
 
           <SpeedometerGauge
-            value={powerKva}
-            unit="kVA"
-            max={120}
+            value={isLive ? powerVa : powerKva}
+            unit={isLive ? "VA" : "kVA"}
+            max={isLive ? 200 : 120}
             todayPeak={cmdPeakToday}
             monthPeak={cmdPeakMonth}
           />
@@ -513,15 +567,15 @@ export default function FieldEngineerPictorialView() {
         {/* 4. POWER BIG SPEEDOMETER GAUGE WITH ARROW 2 (Bottom Left - 4 cols) */}
         <div className="lg:col-span-4 bg-white rounded-3xl p-6 shadow-sm border-2 border-slate-200 flex flex-col items-center justify-between text-center">
           <h3 className="text-base md:text-lg font-black text-slate-900 text-center mb-1">
-            Power
+            Power {isLive && <span className="text-xs text-teal-600 font-extrabold">(Active Load)</span>}
           </h3>
 
           <SpeedometerGauge
-            value={powerKw}
-            unit="kW"
-            max={120}
-            todayPeak={Number(md.today_highest_peak_kw || 76.5)}
-            monthPeak={Number(md.month_highest_peak_kw || 85.2)}
+            value={isLive ? powerWatts : powerKw}
+            unit={isLive ? "W" : "kW"}
+            max={isLive ? 200 : 120}
+            todayPeak={powerPeakToday}
+            monthPeak={powerPeakMonth}
           />
         </div>
 
@@ -594,23 +648,27 @@ export default function FieldEngineerPictorialView() {
             </h3>
 
             <div className="space-y-4">
-              {/* Total kVAh */}
+              {/* Total VAh / kVAh */}
               <div className="text-center">
                 <div className="text-xs md:text-sm font-black text-slate-800 mb-1.5">
-                  Total kVAh (Apparent Energy)
+                  {isLive ? 'Total VAh (Apparent Energy)' : 'Total kVAh (Apparent Energy)'}
                 </div>
                 <div className="w-full bg-[#949be8] hover:bg-[#858de2] transition-colors text-white font-black text-2xl lg:text-3xl py-3.5 px-6 rounded-full text-center shadow-md tracking-tight">
-                  {energyKvah.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                  {isLive
+                    ? energyVah.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+                    : energyKvah.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                 </div>
               </div>
 
-              {/* Total kWh */}
+              {/* Total Wh / kWh */}
               <div className="text-center">
                 <div className="text-xs md:text-sm font-black text-slate-800 mb-1.5">
-                  Total kWh (Active Energy)
+                  {isLive ? 'Total Wh (Active Energy)' : 'Total kWh (Active Energy)'}
                 </div>
                 <div className="w-full bg-[#949be8] hover:bg-[#858de2] transition-colors text-white font-black text-2xl lg:text-3xl py-3.5 px-6 rounded-full text-center shadow-md tracking-tight">
-                  {energyKwh.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                  {isLive
+                    ? energyWh.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+                    : energyKwh.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                 </div>
               </div>
             </div>
@@ -634,7 +692,7 @@ export default function FieldEngineerPictorialView() {
               💰 Shift Energy Economics & Tariff Summary
             </span>
             <span className="text-[11px] font-black bg-indigo-100 text-indigo-950 border border-indigo-200 px-2.5 py-0.5 rounded-full">
-              HT-2A Industrial Tariff (@ ₹ 7.50 / kWh)
+              {isLive ? 'Low-Load Tariff (@ ₹ 7.50 / kWh = ₹ 0.0075 / Wh)' : 'HT-2A Industrial Tariff (@ ₹ 7.50 / kWh)'}
             </span>
           </div>
           <div className="text-xs font-bold text-slate-600">
@@ -674,7 +732,7 @@ export default function FieldEngineerPictorialView() {
             <div>
               <div className="text-[11px] font-black text-emerald-900 uppercase tracking-wider">Power Factor Incentive</div>
               <div className="text-xl font-black text-emerald-950 mt-0.5">
-                + ₹ 4,380 <span className="text-xs font-bold text-emerald-800">Rebate</span>
+                + ₹ {isLive ? '420' : '4,380'} <span className="text-xs font-bold text-emerald-800">Rebate</span>
               </div>
             </div>
             <div className="text-[10px] font-black text-emerald-900 bg-white border border-emerald-300 px-2.5 py-1 rounded-lg">
@@ -682,16 +740,15 @@ export default function FieldEngineerPictorialView() {
             </div>
           </div>
 
-          {/* CMD Penalty Avoided */}
           <div className="bg-teal-50 border-2 border-teal-200 rounded-2xl p-3.5 flex items-center justify-between">
             <div>
               <div className="text-[11px] font-black text-teal-900 uppercase tracking-wider">Peak Surcharge Avoided</div>
               <div className="text-xl font-black text-teal-950 mt-0.5">
-                ₹ 14,200 <span className="text-xs font-bold text-teal-800">Saved</span>
+                ₹ {isLive ? '4,200' : '14,200'} <span className="text-xs font-bold text-teal-800">Saved</span>
               </div>
             </div>
             <div className="text-[10px] font-black text-teal-900 bg-white border border-teal-300 px-2.5 py-1 rounded-lg">
-              Within Limit
+              {isLive ? '≤ 200 VA' : 'Within Limit'}
             </div>
           </div>
         </div>

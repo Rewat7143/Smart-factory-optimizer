@@ -183,17 +183,17 @@ export default function LiveTelemetryDashboard() {
            <div className="bg-white border-2 border-slate-200 p-4 rounded-xl shadow-sm">
               <div className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Watts Total (40101)</div>
               <div className="text-xl lg:text-2xl font-black text-teal-700 mt-1">
-                {isOffline ? '---' : `${(watts_total / 1000).toFixed(3)}`} <span className="text-xs font-bold text-slate-500">kW</span>
+                {isOffline ? '---' : `${watts_total.toFixed(1)}`} <span className="text-xs font-bold text-slate-500">W</span>
               </div>
-              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">{watts_total.toFixed(0)} W</div>
+              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">{(watts_total / 1000).toFixed(3)} kW</div>
            </div>
 
            <div className="bg-white border-2 border-slate-200 p-4 rounded-xl shadow-sm">
               <div className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">VA Total (40125)</div>
               <div className="text-xl lg:text-2xl font-black text-slate-800 mt-1">
-                {isOffline ? '---' : `${(va_total / 1000).toFixed(3)}`} <span className="text-xs font-bold text-slate-500">kVA</span>
+                {isOffline ? '---' : `${va_total.toFixed(1)}`} <span className="text-xs font-bold text-slate-500">VA</span>
               </div>
-              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">{va_total.toFixed(0)} VA</div>
+              <div className="text-[11px] text-slate-400 font-semibold mt-0.5">{(va_total / 1000).toFixed(3)} kVA</div>
            </div>
 
            <div className="bg-white border-2 border-slate-200 p-4 rounded-xl shadow-sm">
