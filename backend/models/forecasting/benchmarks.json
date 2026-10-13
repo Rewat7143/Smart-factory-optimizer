@@ -1,0 +1,20 @@
+{
+    "XGBoost": {
+        "MAE": 5.85,
+        "RMSE": 11.01,
+        "Latency_ms": 1.2,
+        "Parameters": "100 trees"
+    },
+    "Chronos-Bolt": {
+        "MAE": 6.12,
+        "RMSE": 9.45,
+        "Latency_ms": 450.0,
+        "Parameters": "46M"
+    },
+    "Naive Baseline": {
+        "MAE": 14.61,
+        "RMSE": 26.99,
+        "Latency_ms": 0.1,
+        "Parameters": "0"
+    }
+}

@@ -1,0 +1,40 @@
+{
+    "FORECAST-XGB-STEEL-V1": {
+        "model_id": "FORECAST-XGB-STEEL-V1",
+        "version": "1.0",
+        "model_type": "XGBRegressor",
+        "dataset": "UCI Steel Industry Dataset",
+        "dataset_version": "1.0",
+        "training_period": "2018-01-02T00:00:00 to 2018-09-13T18:45:00",
+        "validation_period": "2018-09-13T19:00:00 to 2018-11-07T09:15:00",
+        "test_period": "2018-11-07T09:30:00 to 2018-12-31T23:45:00",
+        "features": [
+            "hour",
+            "minute",
+            "day_of_week",
+            "is_weekend",
+            "NSM",
+            "lag_1h",
+            "lag_24h",
+            "rolling_mean_4h"
+        ],
+        "metrics": {
+            "xgboost_mae": 5.8367,
+            "xgboost_rmse": 10.965,
+            "naive_mae": 14.457
+        },
+        "feature_importance": {
+            "lag_1h": 0.5049095749855042,
+            "lag_24h": 0.15156595408916473,
+            "day_of_week": 0.11854784190654755,
+            "NSM": 0.09499166160821915,
+            "rolling_mean_4h": 0.06778108328580856,
+            "hour": 0.05599378049373627,
+            "minute": 0.0062101916410028934,
+            "is_weekend": 0.0
+        },
+        "artifact_path": "models/forecasting/xgboost_steel_v1.joblib",
+        "created_at": "2026-10-14T00:34:56.258429",
+        "status": "VALIDATED"
+    }
+}

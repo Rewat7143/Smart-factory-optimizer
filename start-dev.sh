@@ -8,12 +8,12 @@ BACKEND_PID=$!
 
 # Start Next.js frontend
 cd ../frontend
-npm run dev &
+npm run dev -- -p 3005 --webpack &
 FRONTEND_PID=$!
 
 echo "Development servers started."
 echo "Backend: http://localhost:8000"
-echo "Frontend: http://localhost:3000"
+echo "Frontend: http://localhost:3005"
 
 # Wait for both processes
 wait $BACKEND_PID

@@ -1,9 +1,13 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
+from api.google_sheets import gsheets_db
+import logging
+
+logger = logging.getLogger(__name__)
 
 class HistoryGenerator:
-    """Generates realistic historical data for the factory based on asset characteristics."""
+    """Provides historical data for the factory, backed by Google Sheets."""
     def __init__(self, factory_model, days: int = 30, interval_min: int = 15):
         self.factory = factory_model
         self.days = days
@@ -11,64 +15,60 @@ class HistoryGenerator:
         self.history_df = None
         
     def generate(self) -> pd.DataFrame:
-        print("Generating realistic historical data...")
-        end_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-        start_time = end_time - timedelta(days=self.days)
+        logger.info("Fetching historical data from Google Sheets...")
         
-        timestamps = pd.date_range(start=start_time, end=end_time, freq=f'{self.interval_min}min')
-        n_samples = len(timestamps)
+        # In a real environment we would load purely from Google Sheets.
+        # But if the sheet is empty or offline, we must provide a fallback dataframe structure 
+        # so the app doesn't crash, but per user instructions we shouldn't "invent" data.
+        # Let's try to fetch from GSheets.
+        df = gsheets_db.get_historical_dataset()
         
-        data = {
-            'timestamp': timestamps,
-            'temperature_c': np.random.normal(25, 5, n_samples) + np.sin(np.linspace(0, self.days * 2 * np.pi, n_samples)) * 5,
-            'production_target_percent': np.ones(n_samples) * 100.0,
-        }
-        
-        # Introduce weekends / off shifts
-        hour_of_day = timestamps.hour
-        day_of_week = timestamps.dayofweek
-        
-        # 0 = Monday, 6 = Sunday
-        # Let's say Sunday is off
-        is_operating = (day_of_week < 6) & (hour_of_day >= 6) & (hour_of_day < 22)
-        
-        data['production_rate'] = np.where(is_operating, np.random.uniform(90, 100, n_samples), 0.0)
-        
-        # Base demand from production assets
-        total_demand = np.zeros(n_samples)
-        
-        for asset_id, asset in self.factory.assets.items():
-            # Asset specific power curve
-            asset_power = np.zeros(n_samples)
-            if asset.production_dependency:
-                asset_power = np.where(data['production_rate'] > 0, 
-                                     asset.operating_power_kw * (data['production_rate'] / 100.0) + np.random.normal(0, 0.5, n_samples), 
-                                     asset.idle_power_kw)
-            elif asset.category == 'HVAC':
-                # HVAC depends on temperature and operation
-                asset_power = np.where(is_operating, 
-                                     asset.operating_power_kw + (data['temperature_c'] - 20) * 0.5, 
-                                     asset.idle_power_kw)
-            else:
-                # Flexible loads
-                # Random cycles during operation
-                cycles = np.random.choice([0, asset.operating_power_kw], p=[0.3, 0.7], size=n_samples)
-                asset_power = np.where(is_operating, cycles, asset.idle_power_kw)
-                
-            # Bound the power to >= 0
-            asset_power = np.maximum(asset_power, 0)
-            data[f'{asset_id}_power'] = asset_power
-            total_demand += asset_power
+        if df.empty:
+            logger.warning("Google Sheets returned empty historical dataset. Providing zeroed fallback to prevent crash.")
+            end_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+            start_time = end_time - timedelta(days=self.days)
+            timestamps = pd.date_range(start=start_time, end=end_time, freq=f'{self.interval_min}min')
+            n_samples = len(timestamps)
             
-        data['total_demand_kw'] = total_demand
+            data = {
+                'timestamp': timestamps,
+                'temperature_c': np.zeros(n_samples),
+                'production_target_percent': np.zeros(n_samples),
+                'total_demand_kw': np.zeros(n_samples),
+                'production_rate': np.zeros(n_samples)
+            }
+            
+            for asset_id in self.factory.assets:
+                data[f'{asset_id}_power'] = np.zeros(n_samples)
+                
+            self.history_df = pd.DataFrame(data)
+        else:
+            # Parse timestamps
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            self.history_df = df
+            
         
-        self.history_df = pd.DataFrame(data)
-        
-        # Fill NA just in case
-        self.history_df.fillna(0, inplace=True)
         return self.history_df
-        
+
     def get_history(self) -> pd.DataFrame:
+
         if self.history_df is None:
             self.generate()
         return self.history_df
+    def append_reading(self, timestamp, power_kw, production_percent):
+        if self.history_df is not None:
+            new_data = {
+                'timestamp': [pd.to_datetime(timestamp)],
+                'total_demand_kw': [power_kw],
+                'production_percent': [production_percent],
+                'temperature_c': [self.factory.temperature_c]
+            }
+            # Append individual asset powers
+            for asset_id, asset in self.factory.assets.items():
+                new_data[f'{asset_id}_power'] = [asset.get_current_power()]
+                
+            new_row = pd.DataFrame(new_data)
+            self.history_df = pd.concat([self.history_df, new_row], ignore_index=True)
+
+
+

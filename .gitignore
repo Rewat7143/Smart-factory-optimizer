@@ -1,7 +1,79 @@
+# Environment variables & secrets (CRITICAL: Never commit credentials)
 .env
-.env.local
-node_modules/
-.venv/
+.env.*
+!.env.example
+*.env
+*.env.*
+service-account*.json
+*service-account*.json
+*smart-factory-optimization*.json
+credentials.json
+*.pem
+*.key
+
+# Python artifacts
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+
+# Testing & Linting
 .pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Databases & local state
+*.db
+*.sqlite
+*.sqlite3
+telemetry_queue.db
+telemetry.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+uvicorn.log
+
+# Node.js & Next.js
+node_modules/
 .next/
+out/
+next-env.d.ts
+
+# OS & Editor files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+

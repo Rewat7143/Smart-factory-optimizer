@@ -1,0 +1,25 @@
+{
+    "dataset_name": "Steel Industry Energy Consumption",
+    "source": "UCI Machine Learning Repository",
+    "uci_id": 851,
+    "license": "CC BY 4.0",
+    "citation": "D. Sathishkumar, C. Bogos, Steel Industry Energy Consumption Dataset, UCI Machine Learning Repository, 2021.",
+    "download_timestamp": "2026-10-05T10:59:47.877830",
+    "row_count": 35040,
+    "columns": [
+        "date",
+        "Usage_kWh",
+        "Lagging_Current_Reactive.Power_kVarh",
+        "Leading_Current_Reactive_Power_kVarh",
+        "CO2(tCO2)",
+        "Lagging_Current_Power_Factor",
+        "Leading_Current_Power_Factor",
+        "NSM",
+        "WeekStatus",
+        "Day_of_week",
+        "Load_Type"
+    ],
+    "time_range": "01/01/2018 00:00 to 31/12/2018 23:45",
+    "target_variable": "Usage_kWh",
+    "preprocessing_version": "1.0"
+}

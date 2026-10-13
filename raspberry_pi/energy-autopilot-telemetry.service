@@ -1,0 +1,27 @@
+[Unit]
+Description=Factory Energy Autopilot — L&T Meter Telemetry & Cloud Forwarding Service
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smartgrid
+Group=dialout
+WorkingDirectory=/home/smartgrid/factory-energy-autopilot/raspberry_pi
+EnvironmentFile=/home/smartgrid/factory-energy-autopilot/raspberry_pi/.env
+ExecStart=/home/smartgrid/factory-energy-autopilot/raspberry_pi/.venv/bin/python3 main.py
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=energy-telemetry
+
+# Security sandbox hardening on Raspberry Pi
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/smartgrid/factory-energy-autopilot/raspberry_pi
+
+[Install]
+WantedBy=multi-user.target

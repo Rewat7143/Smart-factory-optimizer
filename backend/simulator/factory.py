@@ -20,24 +20,26 @@ class FactoryModel:
         self.temperature_c = 25.0
         self.active_scenario = FactoryScenario.NORMAL_PRODUCTION
         self.total_energy_kwh = 0.0
+        self.sim_time_minutes = 0.0
         
         self.assets: Dict[str, Asset] = {}
         self._initialize_assets()
+
         
     def _initialize_assets(self):
         # Critical Production Motors
         self.add_asset(Asset("M-001", "Production Motor 01", "Production", Criticality.CRITICAL, 
-                             rated_power_kw=15.0, operating_power_kw=12.0, startup_power_kw=25.0, idle_power_kw=2.0, startup_duration_minutes=1.0, production_dependency=True))
+                             rated_power_kw=15.0, operating_power_kw=14.0, startup_power_kw=25.0, idle_power_kw=2.0, startup_duration_minutes=1.0, production_dependency=True))
         self.add_asset(Asset("M-002", "Production Motor 02", "Production", Criticality.CRITICAL, 
-                             rated_power_kw=18.0, operating_power_kw=15.0, startup_power_kw=30.0, idle_power_kw=2.5, startup_duration_minutes=1.5, production_dependency=True))
+                             rated_power_kw=18.0, operating_power_kw=16.5, startup_power_kw=30.0, idle_power_kw=2.5, startup_duration_minutes=1.5, production_dependency=True))
         self.add_asset(Asset("M-003", "Production Motor 03", "Production", Criticality.CRITICAL, 
-                             rated_power_kw=10.0, operating_power_kw=8.0, startup_power_kw=18.0, idle_power_kw=1.5, startup_duration_minutes=0.5, production_dependency=True))
+                             rated_power_kw=10.0, operating_power_kw=9.5, startup_power_kw=18.0, idle_power_kw=1.5, startup_duration_minutes=0.5, production_dependency=True))
                              
         # Flexible Utility
         self.add_asset(Asset("CMP-001", "Air Compressor", "Utility", Criticality.FLEXIBLE, 
-                             rated_power_kw=25.0, operating_power_kw=21.4, startup_power_kw=35.0, idle_power_kw=4.0, startup_duration_minutes=2.0, production_dependency=False))
+                             rated_power_kw=30.0, operating_power_kw=28.5, startup_power_kw=38.0, idle_power_kw=4.0, startup_duration_minutes=2.0, production_dependency=False))
         self.add_asset(Asset("PMP-001", "Process Pump", "Utility", Criticality.FLEXIBLE, 
-                             rated_power_kw=15.0, operating_power_kw=12.5, startup_power_kw=25.0, idle_power_kw=3.0, startup_duration_minutes=1.0, production_dependency=False))
+                             rated_power_kw=25.0, operating_power_kw=22.5, startup_power_kw=30.0, idle_power_kw=3.0, startup_duration_minutes=1.0, production_dependency=False))
                              
         # Opportunistic HVAC
         self.add_asset(Asset("HVAC-001", "HVAC System", "HVAC", Criticality.OPPORTUNISTIC, 
@@ -57,8 +59,10 @@ class FactoryModel:
 
     def get_total_power_kw(self) -> float:
         return sum(asset.get_current_power() for asset in self.assets.values())
-
     def update(self, dt_minutes: float):
+        self.sim_time_minutes = (self.sim_time_minutes + dt_minutes) % 60.0
+        self._cycle_phases()
+        
         # Apply scenario behaviors
         self._apply_scenario_behaviors()
 
@@ -71,12 +75,40 @@ class FactoryModel:
         total_critical = sum(1 for a in self.assets.values() if a.production_dependency)
         
         self.current_production_percent = (running_critical / total_critical) * 100.0 if total_critical > 0 else 0.0
-        
         # Accumulate energy
         power = self.get_total_power_kw()
         self.total_energy_kwh += power * (dt_minutes / 60.0)
+        # Push to history
+        global history_db
+        from datetime import datetime, timezone
+        if 'history_db' in globals() and history_db.history_df is not None:
+            history_db.append_reading(datetime.now(timezone.utc), power, self.current_production_percent)
+
+
+
+    def _cycle_phases(self):
+        t = self.sim_time_minutes
+        if 0 <= t < 15:
+            self.set_scenario(FactoryScenario.NORMAL_PRODUCTION)
+        elif 15 <= t < 25:
+            self.set_scenario(FactoryScenario.HIGH_PRODUCTION)
+        elif 25 <= t < 35:
+            # Sudden startup of a high-load machine (e.g. big pump)
+            pmp = self.get_asset("PMP-001")
+            if pmp and pmp.status == MachineState.OFF: 
+                pmp.update_state(MachineState.STARTING, 0.0)
+            self.set_scenario(FactoryScenario.NORMAL_PRODUCTION)
+        elif 35 <= t < 40:
+            self.set_scenario(FactoryScenario.PEAK_RISK)
+        elif 40 <= t < 45:
+            self.set_scenario(FactoryScenario.MACHINE_ANOMALY)
+        elif 45 <= t < 50:
+            self.set_scenario(FactoryScenario.IDLE_WASTE)
+        else:
+            self.set_scenario(FactoryScenario.NORMAL_PRODUCTION)
 
     def _apply_scenario_behaviors(self):
+
         if self.active_scenario == FactoryScenario.PEAK_RISK:
             # Compressor and Pump overlap
             cmp = self.get_asset("CMP-001")
@@ -100,14 +132,20 @@ class FactoryModel:
             hvac = self.get_asset("HVAC-001")
             if hvac and hvac.status == MachineState.OFF:
                 hvac.update_state(MachineState.RUNNING, 0.0)
-
     def set_scenario(self, scenario: FactoryScenario):
         self.active_scenario = scenario
         if scenario == FactoryScenario.NORMAL_PRODUCTION:
             # Restore normal states
             for a in self.assets.values():
-                if a.status == MachineState.FAULT:
-                    a.status = MachineState.RUNNING
+                if a.status == MachineState.FAULT or a.status == MachineState.IDLE:
+                    a.update_state(MachineState.RUNNING, 0)
+            
+            # Turn off utility overlapping loads that were started during peak
+            cmp = self.get_asset("CMP-001")
+            pmp = self.get_asset("PMP-001")
+            if cmp: cmp.update_state(MachineState.OFF, 0)
+            if pmp: pmp.update_state(MachineState.OFF, 0)
+
 
     def start_demo_production(self):
         self.active_scenario = FactoryScenario.NORMAL_PRODUCTION

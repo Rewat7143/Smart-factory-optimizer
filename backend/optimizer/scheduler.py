@@ -5,40 +5,37 @@ def optimize_schedule(current_demand: float, predicted_peak: float, safe_target:
                       flexible_loads: List[Dict[str, Any]], critical_loads: List[Dict[str, Any]],
                       production_target_percent: float, current_production_percent: float) -> Dict[str, Any]:
     
-    # PHASE 20: HARD PRODUCTION CONSTRAINT
-    # Check if production target is at risk
     if current_production_percent < production_target_percent:
         return {
             "status": "REJECTED",
-            "message": "Optimization violates production constraint.",
+            "message": "It violates production constraint.",
             "production_impact": "UNACCEPTABLE",
             "critical_assets": "PROTECTED",
-            "before_peak": round(predicted_peak, 2),
-            "actions": [],
+            "actions": [], "alternatives": [{"name": "BASELINE", "peak": round(predicted_peak, 2), "production": f"{current_production_percent}%", "status": "CURRENT"}],
             "alternatives": []
         }
-        
+
+    # 1. No optimization needed if safe
     if predicted_peak <= safe_target:
         return {
             "status": "OPTIMAL",
-            "message": "No optimization required.",
+            "message": "Plant operating within safe contract limits. Baseline schedule is optimal.",
             "production_impact": "0%",
             "critical_assets": "PROTECTED",
-            "actions": []
+            "before_peak": round(predicted_peak, 2),
+            "after_peak": round(predicted_peak, 2),
+            "actions": [],
+            "alternatives": [{"name": "BASELINE", "peak": round(predicted_peak, 2), "production": f"{current_production_percent}%", "status": "CURRENT"}]
         }
         
-    # PHASE 21: COUNTERFACTUAL ENGINE
-    # We will generate a few alternatives instead of just one
-    
+    # 2. Optimization Required - Generate Counterfactuals
     sorted_flex = sorted(flexible_loads, key=lambda x: x['power_kw'], reverse=True)
-    
     reduction_needed = predicted_peak - safe_target
     
-    # BASELINE
     baseline = {
         "name": "BASELINE",
         "peak": round(predicted_peak, 2),
-        "production": "100%",
+        "production": f"{current_production_percent}%",
         "status": "CURRENT"
     }
     
@@ -46,44 +43,60 @@ def optimize_schedule(current_demand: float, predicted_peak: float, safe_target:
     best_actions = []
     achieved_reduction = 0.0
     
-    # Generate some counterfactuals
+    # OPTION A: Attempt to stop a critical production load (Must be rejected)
+    if critical_loads:
+        crit = critical_loads[0]
+        alternatives.append({
+            "name": f"Stop {crit.get('name', crit.get('asset_id'))}",
+            "peak": round(predicted_peak - crit['power_kw'], 2),
+            "production": "0%", # Drops production
+            "status": "REJECTED",
+            "reason": "Violates production constraint"
+        })
+        
+    # OPTION B: Shift flexible load
     if sorted_flex:
-        # Option A: Stop largest flexible load entirely (too drastic if it's needed)
         largest = sorted_flex[0]
         alternatives.append({
-            "name": f"Stop {largest['name']} completely",
+            "name": f"Delay {largest.get('name', largest.get('asset_id'))} 8 min",
             "peak": round(predicted_peak - largest['power_kw'], 2),
-            "production": "100%", # Assumes flex load doesn't affect production
-            "status": "REJECTED",
-            "reason": "Violates minimum runtime constraint"
-        })
-        
-        # Option B (Selected): Delay largest flexible load
-        alternatives.append({
-            "name": f"Delay {largest['name']} 8 min",
-            "peak": round(predicted_peak - largest['power_kw'], 2),
-            "production": "100%",
+            "production": f"{current_production_percent}%",
             "status": "SELECTED"
         })
+        
         best_actions.append({
+            "asset": largest['asset_id'],
             "asset_id": largest['asset_id'],
-            "name": largest['name'],
-            "action": "Delay start by 8 minutes",
-            "reduction_kw": largest['power_kw']
+            "name": largest.get('name', largest.get('asset_id')),
+            "action": f"Delay {largest.get('name', largest.get('asset_id'))} startup by 8 minutes",
+            "reduction_kw": largest['power_kw'],
+            "why": {
+                "peak_risk": "HIGH",
+                "reasons": [
+                    f"Production already consuming {round(current_production_percent,1)}% capacity",
+                    f"{largest.get('name', largest.get('asset_id'))} startup adds {largest['power_kw']} kW",
+                    f"Demand forecast exceeds safe threshold by {round(reduction_needed, 1)} kW"
+                ],
+                "protected": "Production Line Assets",
+                "flexible": largest.get('name', largest.get('asset_id'))
+            }
         })
+
         achieved_reduction = largest['power_kw']
         
-        # Option C: Shift second largest
-        if len(sorted_flex) > 1:
-            second = sorted_flex[1]
-            alternatives.append({
-                "name": f"Shift {second['name']} 5 min",
-                "peak": round(predicted_peak - second['power_kw'], 2),
-                "production": "100%",
-                "status": "ALTERNATIVE"
-            })
-            
     new_peak = predicted_peak - achieved_reduction
+    
+    # If we STILL couldn't find a solution, then we truly reject
+    if not best_actions:
+         return {
+            "status": "REJECTED",
+            "message": "No flexible loads available to reduce peak without violating production constraint.",
+            "production_impact": "UNACCEPTABLE",
+            "critical_assets": "PROTECTED",
+            "before_peak": round(predicted_peak, 2),
+            "actions": [], "alternatives": [{"name": "BASELINE", "peak": round(predicted_peak, 2), "production": f"{current_production_percent}%", "status": "CURRENT"}],
+            "alternatives": [baseline] + alternatives
+        }
     
     return {
         "status": "OPTIMIZED",
