@@ -381,10 +381,10 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
             GPIO.setwarnings(False)
             for ch, pin in self.pins.items():
                 if pin is not None:
-                    # De-energized initial state (active low: HIGH = off, LOW = on)
-                    init_level = GPIO.HIGH if self.active_low else GPIO.LOW
+                    # Initial operating state: relays energized / contacts closed (active-low: LOW = on)
+                    init_level = GPIO.LOW if self.active_low else GPIO.HIGH
                     GPIO.setup(pin, GPIO.OUT, initial=init_level)
-                    logger.info(f"[RPi4B Relay Adapter] Relay channel {ch} setup on BCM GPIO {pin}.")
+                    logger.info(f"[RPi4B Relay Adapter] Relay channel {ch} setup on BCM GPIO {pin} (initially energized/ON).")
             self._gpio_initialized = True
             return True
         except Exception as e:
@@ -401,18 +401,27 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
 
         if self.monitor_only or pin is None or not self._gpio_initialized:
             # Virtual/monitor-only mode: record state and log
-            action_desc = "SHED (TRIPPED)" if state else "RESTORED (NORMAL)"
+            action_desc = "SHED (OFF / DISCONNECTED)" if state else "RESTORED (ON / CONNECTED)"
             logger.info(
                 f"[MONITOR_ONLY] Relay channel {channel} {action_desc}. "
                 f"Physical pin {pin} unactuated."
             )
             return True
 
-        # Active hardware actuation
+        # Active hardware actuation:
+        # state == True -> SHED (Turn OFF load) -> active-low: GPIO.HIGH (de-energize coil)
+        # state == False -> RESTORE (Turn ON load) -> active-low: GPIO.LOW (energize coil)
         try:
-            level = GPIO.LOW if (state if self.active_low else not state) else GPIO.HIGH
+            if self.active_low:
+                level = GPIO.HIGH if state else GPIO.LOW
+            else:
+                level = GPIO.LOW if state else GPIO.HIGH
+
             GPIO.output(pin, level)
-            logger.info(f"[RPi4B Relay Adapter] Actuated Relay {channel} (BCM {pin}) -> Level {level}.")
+            logger.info(
+                f"[RPi4B Relay Adapter] Actuated Relay {channel} (BCM {pin}) -> Level "
+                f"{'HIGH (OFF)' if level == GPIO.HIGH else 'LOW (ON)'} (Load {'SHED/OFF' if state else 'RESTORED/ON'})."
+            )
             return True
         except Exception as e:
             logger.error(f"[RPi4B Relay Adapter] Failed to actuate Relay {channel}: {e}")

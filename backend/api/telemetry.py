@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 from schemas.energy import EnergyReading, DataSource, DataQuality, MachineState
@@ -14,6 +14,8 @@ router = APIRouter()
 # Keep state in memory for health/live tracking
 live_device_state: Dict[str, dict] = {}
 latest_reading: Optional[EnergyReading] = None
+latest_relay_decision: Optional[Dict[str, Any]] = None
+pending_relay_commands: List[Dict[str, Any]] = []
 # We still keep a small bounded memory buffer for quick API reads to avoid rate limits on every dashboard poll, 
 # but persistence relies ENTIRELY on gsheets_db
 recent_readings_cache: List[EnergyReading] = []
@@ -78,9 +80,12 @@ class TelemetryPayload(BaseModel):
     energy_vah: Optional[float] = None    # 40161: VAh
     load_hours: Optional[int] = None      # 40217: Load Hours
 
+    # Relay State Machine telemetry
+    relay_decision: Optional[Dict[str, Any]] = None
+
 @router.post("/telemetry/ingest")
 def ingest_telemetry(payload: TelemetryPayload):
-    global latest_reading
+    global latest_reading, latest_relay_decision
     
     try:
         ts = datetime.fromisoformat(payload.timestamp.replace('Z', '+00:00'))
@@ -313,7 +318,10 @@ def ingest_telemetry(payload: TelemetryPayload):
         "packet_count": live_device_state.get(payload.device_id, {}).get("packet_count", 0) + 1
     }
     
-    return {
+    if payload.relay_decision:
+        latest_relay_decision = payload.relay_decision
+
+    resp = {
         "accepted": True,
         "device_id": payload.device_id,
         "source": payload.source,
@@ -323,6 +331,71 @@ def ingest_telemetry(payload: TelemetryPayload):
             "database": "PERSISTED" if db_success else "FAILED",
             "google_sheets": "PENDING_SYNC"
         }
+    }
+    if pending_relay_commands:
+        resp["pending_relay_command"] = pending_relay_commands.pop(0)
+
+    return resp
+
+class RelayControlPayload(BaseModel):
+    channel: Optional[int] = 1 # 1, 2, 3
+    action: str # "SHED", "RESTORE", "EMERGENCY_RESTORE_ALL", "AUTO"
+
+@router.get("/relays/status")
+def get_relay_status():
+    global latest_relay_decision, pending_relay_commands
+    status = latest_relay_decision or {
+        "state": "NORMAL",
+        "mode": "ACTIVE",
+        "threshold_kw": 0.14,
+        "ceiling_kw": 0.20,
+        "delay_seconds": 8.0,
+        "restart_delay_seconds": 10.0,
+        "priority_order": "Relay 1 (1st) -> Relay 2 (2nd) -> Relay 3 (3rd)",
+        "channels": {
+            "1": {"channel_id": 1, "name": "Relay 1 (Opportunistic Load)", "priority": 1, "is_shed": False, "state": "OPERATIONAL"},
+            "2": {"channel_id": 2, "name": "Relay 2 (Flexible Load)", "priority": 2, "is_shed": False, "state": "OPERATIONAL"},
+            "3": {"channel_id": 3, "name": "Relay 3 (Protected Load)", "priority": 3, "is_shed": False, "state": "OPERATIONAL"}
+        }
+    }
+    return {
+        "relay_decision": status,
+        "pending_queue_count": len(pending_relay_commands),
+        "server_timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+@router.post("/relays/control")
+def control_relays(cmd: RelayControlPayload):
+    global pending_relay_commands, latest_relay_decision
+    command_dict = {
+        "channel": cmd.channel or 1,
+        "action": cmd.action.upper(),
+        "queued_at": datetime.now(timezone.utc).isoformat()
+    }
+    pending_relay_commands.append(command_dict)
+    
+    # Optimistically update in-memory state for instantaneous UI response
+    if latest_relay_decision and "channels" in latest_relay_decision:
+        chs = latest_relay_decision["channels"]
+        ch_key = str(cmd.channel) if str(cmd.channel) in chs else cmd.channel
+        if cmd.action.upper() in ("SHED", "OFF"):
+            if ch_key in chs:
+                chs[ch_key]["is_shed"] = True
+                chs[ch_key]["state"] = "SHED"
+        elif cmd.action.upper() in ("RESTORE", "ON"):
+            if ch_key in chs:
+                chs[ch_key]["is_shed"] = False
+                chs[ch_key]["state"] = "OPERATIONAL"
+        elif cmd.action.upper() == "EMERGENCY_RESTORE_ALL":
+            for c in chs.values():
+                c["is_shed"] = False
+                c["state"] = "OPERATIONAL"
+            latest_relay_decision["state"] = "NORMAL"
+
+    return {
+        "status": "QUEUED",
+        "message": f"Relay command {cmd.action} queued for Raspberry Pi hardware actuation.",
+        "command": command_dict
     }
 
 @router.get("/telemetry/health")
@@ -1134,6 +1207,7 @@ def get_layman_analytics(mode: Optional[str] = "SIMULATION"):
                 "cost_inr": round(sum(yearly_kwh) * tariff_rate, 0)
             }
         },
-        "ai_explanation": explanation
+        "ai_explanation": explanation,
+        "relays": get_relay_status()["relay_decision"]
     }
 

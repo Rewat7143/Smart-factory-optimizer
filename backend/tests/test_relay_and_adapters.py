@@ -37,6 +37,7 @@ def test_config():
     cfg.sqlite_db_path = db_path
     cfg.mock_hardware = True
     cfg.enable_google_sheets = False
+    cfg.relay_monitor_only = True
     cfg.peak_demand_threshold_kw = 80.0
     cfg.warning_threshold_ratio = 0.90
     cfg.restore_hysteresis_kw = 5.0

@@ -55,6 +55,7 @@ class ApplicationApiClient:
             )
             if resp.status_code == 200:
                 data = resp.json()
+                self.last_response_data = data
                 if data.get("accepted"):
                     return True, None
                 return False, f"Server returned accepted=False: {data}"
@@ -83,8 +84,9 @@ class ApplicationApiClient:
             else:
                 failed_ids.append(rec_id)
                 logger.warning(f"Failed to ingest event {rec_id}: {err}")
-                # If network connection refused, stop early to avoid hammering an offline server
-                if "Connection refused" in (err or "") or "Connection failed" in (err or ""):
+                # If network error or timeout, stop early to avoid blocking the real-time acquisition loop
+                err_lower = (err or "").lower()
+                if "connection refused" in err_lower or "connection failed" in err_lower or "timed out" in err_lower:
                     break
 
         return successful_ids, failed_ids

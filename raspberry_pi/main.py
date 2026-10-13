@@ -143,7 +143,8 @@ class TelemetryService:
 
         # 3. Evaluate 3-relay peak-demand state machine
         active_kw = payload.get("active_power_kw", 0.0)
-        relay_decision = self.relay_controller.evaluate_demand(active_kw)
+        va_total = payload.get("va_total")
+        relay_decision = self.relay_controller.evaluate_demand(active_kw, apparent_power_va=va_total)
 
         # Attach relay state to telemetry metadata
         payload["machine_state"] = "RUNNING" if active_kw > 0.1 else "IDLE"
@@ -157,6 +158,15 @@ class TelemetryService:
         if api_success:
             self.queue.mark_application_synced([payload["record_id"]])
             self.health_monitor.record_app_sync(True, count=1)
+
+            # Check if backend forwarded an interactive relay control override
+            if hasattr(self.api_client, "last_response_data") and self.api_client.last_response_data:
+                pending_cmd = self.api_client.last_response_data.get("pending_relay_command")
+                if pending_cmd:
+                    ch = int(pending_cmd.get("channel", 1))
+                    act = str(pending_cmd.get("action", ""))
+                    logger.info(f"[Remote Dispatch] Received operator command: Channel {ch} -> {act}")
+                    self.relay_controller.manual_command(ch, act)
         else:
             self.queue.record_application_failure(payload["record_id"], api_err or "API Error")
             self.health_monitor.record_app_sync(False, error=api_err)
@@ -241,7 +251,7 @@ def main():
     if args.platform:
         cfg.hardware_platform = args.platform
 
-    monitor_only = True
+    monitor_only = cfg.relay_monitor_only
     if args.active_relays:
         monitor_only = False
     elif args.monitor_only:

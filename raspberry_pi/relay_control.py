@@ -96,13 +96,24 @@ class RelayController:
             f"Peak Threshold: {self.threshold_kw} kW. Hysteresis: {self.hysteresis_kw} kW."
         )
 
-    def evaluate_demand(self, active_power_kw: float, current_time: Optional[float] = None) -> Dict[str, Any]:
+    def evaluate_demand(
+        self,
+        active_power_kw: float,
+        current_time: Optional[float] = None,
+        apparent_power_va: Optional[float] = None
+    ) -> Dict[str, Any]:
         """
-        Evaluates current active power against peak demand threshold and advances the state machine.
-        Returns a detailed decision report.
+        Evaluates current load against peak demand ceiling and safe operating limit:
+        - Priority Shedding Order: Relay 1 OFF 1st -> (delay) -> Relay 2 OFF 2nd -> (delay) -> Relay 3 OFF 3rd
+        - Anti-Surge Staggered Restoration: Relay 3 ON 1st -> (delay) -> Relay 2 ON 2nd -> (delay) -> Relay 1 ON 3rd
         """
         now = current_time if current_time is not None else time.time()
         action_taken = "NONE"
+
+        # Determine effective demand (taking the higher of active kW or apparent kVA to protect power ceiling)
+        effective_kw = float(active_power_kw or 0.0)
+        if apparent_power_va is not None and apparent_power_va > 0.0:
+            effective_kw = max(effective_kw, round(apparent_power_va / 1000.0, 4))
 
         # If threshold is unconfigured, remain in passive NORMAL state without guessing
         if self.threshold_kw is None or self.threshold_kw <= 0:
@@ -113,25 +124,26 @@ class RelayController:
         restore_threshold = max(0.0, self.threshold_kw - self.hysteresis_kw)
 
         # ----------------------------------------------------------------------
-        # DEMAND EXCEEDS PEAK THRESHOLD -> EVALUATE SHEDDING
+        # DEMAND EXCEEDS SAFE OPERATING THRESHOLD -> PRIORITY SHEDDING
+        # Priority order: Relay 1 sheds 1st, then Relay 2, then Relay 3
         # ----------------------------------------------------------------------
-        if active_power_kw > self.threshold_kw:
+        if effective_kw > self.threshold_kw:
             if not self.channels[1].is_shed:
-                # Stage 1: Shed Channel 1 (Opportunistic)
+                # Stage 1: Turn off Relay 1 (Opportunistic load) FIRST
                 action_taken = self._command_channel(1, shed=True, timestamp=now)
                 self.current_state = RelayState.STAGE_1_SHED
                 self.last_stage_transition_time = now
 
             elif (not self.channels[2].is_shed and 
                   (now - self.last_stage_transition_time) >= self.min_trip_time_seconds):
-                # Stage 2: Shed Channel 2 (Flexible) after dwell time
+                # Stage 2: Turn off Relay 2 (Flexible load) SECOND after dwell delay
                 action_taken = self._command_channel(2, shed=True, timestamp=now)
                 self.current_state = RelayState.STAGE_2_SHED
                 self.last_stage_transition_time = now
 
             elif (not self.channels[3].is_shed and 
-                  (now - self.last_stage_transition_time) >= (self.min_trip_time_seconds * 2)):
-                # Stage 3: Extreme emergency peak -> Channel 3 (Protected)
+                  (now - self.last_stage_transition_time) >= self.min_trip_time_seconds):
+                # Stage 3: Extreme ceiling surge -> Turn off Relay 3 (Protected load) LAST after dwell delay
                 action_taken = self._command_channel(3, shed=True, timestamp=now)
                 self.current_state = RelayState.STAGE_3_SHED
                 self.last_stage_transition_time = now
@@ -139,7 +151,7 @@ class RelayController:
         # ----------------------------------------------------------------------
         # DEMAND IN WARNING BAND
         # ----------------------------------------------------------------------
-        elif active_power_kw > warning_threshold:
+        elif effective_kw > warning_threshold:
             # If any relays are currently shed, do NOT restore yet (hysteresis)
             if any(ch.is_shed for ch in self.channels.values()):
                 self.current_state = RelayState.WARNING
@@ -147,13 +159,13 @@ class RelayController:
                 self.current_state = RelayState.WARNING
 
         # ----------------------------------------------------------------------
-        # DEMAND BELOW RESTORATION THRESHOLD -> SEQUENTIAL RESTORE
+        # DEMAND SAFELY BELOW RESTORATION THRESHOLD -> STAGGERED RESTART
         # ----------------------------------------------------------------------
-        elif active_power_kw <= restore_threshold:
+        elif effective_kw <= restore_threshold:
             if any(ch.is_shed for ch in self.channels.values()):
                 self.current_state = RelayState.RESTORING
 
-                # Restore highest priority shed load first (Channel 3 -> 2 -> 1)
+                # Restore highest priority shed load first (Relay 3 -> Relay 2 -> Relay 1)
                 # Enforce anti-inrush restart delay between consecutive restorations
                 if (now - self.last_restore_action_action_check(now)) >= self.min_restart_delay_seconds:
                     for ch_id in (3, 2, 1):
@@ -166,7 +178,7 @@ class RelayController:
             else:
                 self.current_state = RelayState.NORMAL
 
-        return self._build_report(active_power_kw, action_taken)
+        return self._build_report(active_power_kw, action_taken, effective_demand_kw=effective_kw, restore_threshold=restore_threshold)
 
     def _command_channel(self, channel_id: int, shed: bool, timestamp: float) -> str:
         ch = self.channels[channel_id]
@@ -178,12 +190,30 @@ class RelayController:
 
         logger.info(
             f"{mode_prefix} {action_name}: {ch.name} -> "
-            f"{'SHED (Contact Opened)' if shed else 'RESTORED (Contact Closed)'}."
+            f"{'SHED / OFF (Contact Opened)' if shed else 'RESTORED / ON (Contact Closed)'}."
         )
 
-        # Dispatch command to hardware adapter (which respects monitor_only internally)
+        # Dispatch command to hardware adapter
         self.adapter.set_relay(channel_id, shed)
         return action_name
+
+    def manual_command(self, channel_id: int, action: str) -> str:
+        """Manual operator override for testing and interactive SCADA actuation."""
+        now = time.time()
+        if action == "EMERGENCY_RESTORE_ALL":
+            self.emergency_restore_all()
+            return "ALL_RESTORED"
+        elif action in ("SHED", "OFF"):
+            if channel_id in self.channels:
+                act = self._command_channel(channel_id, shed=True, timestamp=now)
+                self.last_stage_transition_time = now
+                return act
+        elif action in ("RESTORE", "ON"):
+            if channel_id in self.channels:
+                act = self._command_channel(channel_id, shed=False, timestamp=now)
+                self.last_restore_action_time = now
+                return act
+        return "UNKNOWN_ACTION"
 
     def emergency_restore_all(self) -> None:
         """Safety override: restores all relay channels immediately."""
@@ -197,14 +227,28 @@ class RelayController:
     def last_restore_action_action_check(self, now: float) -> float:
         return self.last_restore_action_time if self.last_restore_action_time > 0 else (now - self.min_restart_delay_seconds)
 
-    def _build_report(self, active_power_kw: float, action_taken: str, note: Optional[str] = None) -> Dict[str, Any]:
+    def _build_report(
+        self,
+        active_power_kw: float,
+        action_taken: str,
+        note: Optional[str] = None,
+        effective_demand_kw: Optional[float] = None,
+        restore_threshold: Optional[float] = None
+    ) -> Dict[str, Any]:
+        eff_kw = effective_demand_kw if effective_demand_kw is not None else round(active_power_kw, 3)
+        res_kw = restore_threshold if restore_threshold is not None else max(0.0, (self.threshold_kw or 0.0) - self.hysteresis_kw)
         return {
             "state": self.current_state,
             "mode": "MONITOR_ONLY" if self.monitor_only else "ACTIVE",
-            "active_power_kw": round(active_power_kw, 2),
+            "active_power_kw": round(active_power_kw, 3),
+            "effective_demand_kw": round(eff_kw, 3),
             "threshold_kw": self.threshold_kw,
+            "restore_threshold_kw": round(res_kw, 3),
             "action_taken": action_taken,
             "warning": self.current_state in (RelayState.WARNING, RelayState.STAGE_1_SHED, RelayState.STAGE_2_SHED, RelayState.STAGE_3_SHED),
+            "delay_seconds": self.min_trip_time_seconds,
+            "restart_delay_seconds": self.min_restart_delay_seconds,
+            "priority_order": "Relay 1 (1st) -> Relay 2 (2nd) -> Relay 3 (3rd)",
             "channels": {ch_id: ch.to_dict() for ch_id, ch in self.channels.items()},
             "note": note
         }
@@ -214,6 +258,8 @@ class RelayController:
             "current_state": self.current_state,
             "mode": "MONITOR_ONLY" if self.monitor_only else "ACTIVE",
             "threshold_kw": self.threshold_kw,
+            "delay_seconds": self.min_trip_time_seconds,
+            "restart_delay_seconds": self.min_restart_delay_seconds,
             "channels": {ch_id: ch.to_dict() for ch_id, ch in self.channels.items()}
         }
 

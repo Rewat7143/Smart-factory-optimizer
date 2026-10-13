@@ -266,6 +266,33 @@ export default function FieldEngineerPictorialView() {
     }
   }, [mode])
 
+  // Interactive Relay Control State & Handler
+  const [relayActionLoading, setRelayActionLoading] = useState<number | string | null>(null)
+  const [relayMessage, setRelayMessage] = useState<string>('')
+
+  const handleRelayAction = async (channel: number | null, action: 'SHED' | 'RESTORE' | 'EMERGENCY_RESTORE_ALL') => {
+    try {
+      setRelayActionLoading(channel !== null ? channel : action)
+      setRelayMessage(`Dispatching ${action} to Raspberry Pi...`)
+      const baseUrl = (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000/api` : 'http://localhost:8000/api')
+      const res = await fetch(`${baseUrl}/relays/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: channel || 1, action })
+      })
+      if (res.ok) {
+        setRelayMessage(`✓ ${action} command sent successfully!`)
+        setTimeout(() => setRelayMessage(''), 3500)
+      } else {
+        setRelayMessage(`Command error: ${res.statusText}`)
+      }
+    } catch (e: any) {
+      setRelayMessage(`Network error: ${e.message}`)
+    } finally {
+      setTimeout(() => setRelayActionLoading(null), 600)
+    }
+  }
+
   // Live telemetry stream fallback
   const data = useMemo(() => {
     if (analytics) return analytics
@@ -373,6 +400,25 @@ export default function FieldEngineerPictorialView() {
   const TARIFF_RATE = isLive ? 0.0075 : 7.50
   const costToday = Math.round(unitsToday * TARIFF_RATE)
   const costMonth = Math.round(unitsMonth * TARIFF_RATE)
+
+  // Relay State Machine Data
+  const relays = data.relays || analytics?.relays || {
+    state: "NORMAL",
+    mode: "ACTIVE",
+    threshold_kw: isLive ? 0.14 : 90.0,
+    delay_seconds: 8.0,
+    restart_delay_seconds: 10.0,
+    priority_order: "Relay 1 (1st) -> Relay 2 (2nd) -> Relay 3 (3rd)",
+    channels: {
+      "1": { channel_id: 1, name: "Relay 1 (Opportunistic Load)", priority: 1, is_shed: false, state: "OPERATIONAL" },
+      "2": { channel_id: 2, name: "Relay 2 (Flexible Load)", priority: 2, is_shed: false, state: "OPERATIONAL" },
+      "3": { channel_id: 3, name: "Relay 3 (Protected Load)", priority: 3, is_shed: false, state: "OPERATIONAL" }
+    }
+  }
+
+  const ch1 = relays.channels?.[1] || relays.channels?.["1"] || { channel_id: 1, name: "Relay 1 (Opportunistic Load)", priority: 1, is_shed: false, state: "OPERATIONAL" }
+  const ch2 = relays.channels?.[2] || relays.channels?.["2"] || { channel_id: 2, name: "Relay 2 (Flexible Load)", priority: 2, is_shed: false, state: "OPERATIONAL" }
+  const ch3 = relays.channels?.[3] || relays.channels?.["3"] || { channel_id: 3, name: "Relay 3 (Protected Load)", priority: 3, is_shed: false, state: "OPERATIONAL" }
 
   return (
     <div className="space-y-6 text-slate-800">
@@ -691,6 +737,316 @@ export default function FieldEngineerPictorialView() {
           </div>
         </div>
 
+      </div>
+
+      {/* =================================================================== */}
+      {/* ROW 2.5: PRIORITY RELAY LOAD SHEDDING & CEILING PROTECTION MATRIX   */}
+      {/* 3 Physical Relays on Raspberry Pi (BCM 25, 24, 23)                 */}
+      {/* Priority sequence: Relay 1 OFF 1st -> Relay 2 -> Relay 3            */}
+      {/* Restores in reverse: Relay 3 ON 1st -> Relay 2 -> Relay 1           */}
+      {/* =================================================================== */}
+      <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
+        {/* Header with Title, Mode & Master Actions */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 mb-5 border-b border-slate-200 gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <span className="text-base md:text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+                ⚡ Priority Relay Load Shedding &amp; Ceiling Protection Matrix
+              </span>
+              <span className="text-[11px] font-black bg-emerald-100 text-emerald-950 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                ACTIVE HARDWARE ACTUATION (BCM 25, 24, 23)
+              </span>
+              <span className="text-[11px] font-black bg-indigo-100 text-indigo-950 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                Mode: {relays.mode || 'ACTIVE'}
+              </span>
+            </div>
+            <p className="text-xs font-semibold text-slate-500">
+              Autonomous Edge Interlocking: Prioritized Shedding (Relay 1 ➔ 2 ➔ 3) with 8s Dwell Delay &amp; 10s Anti-Surge Reconnection
+            </p>
+          </div>
+
+          {/* Master Control & Feedback */}
+          <div className="flex flex-wrap items-center gap-3">
+            {relayMessage && (
+              <span className="text-xs font-black text-indigo-900 bg-indigo-50 border border-indigo-300 px-3 py-1.5 rounded-xl shadow-xs animate-fade-in">
+                {relayMessage}
+              </span>
+            )}
+            <button
+              onClick={() => handleRelayAction(null, 'EMERGENCY_RESTORE_ALL')}
+              disabled={relayActionLoading !== null}
+              className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs md:text-sm py-2 px-4 rounded-xl shadow-sm flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            >
+              {relayActionLoading === 'EMERGENCY_RESTORE_ALL' ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  Restoring All Relays...
+                </>
+              ) : (
+                <>
+                  <span>🚨 Emergency Restore All Relays</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Operating Thresholds Banner */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5 text-xs">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+            <span className="text-slate-500 font-bold block text-[10px] uppercase">Peak Demand Ceiling</span>
+            <span className="text-slate-900 font-black text-sm">
+              {isLive ? '200 VA (Max Sanctioned)' : '100 kW (HT Limit)'}
+            </span>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+            <span className="text-amber-800 font-bold block text-[10px] uppercase">Safe Trip Threshold</span>
+            <span className="text-amber-950 font-black text-sm">
+              {isLive ? '140 VA (Relay 1 Trips)' : '90.0 kW (Relay 1 Trips)'}
+            </span>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+            <span className="text-emerald-800 font-bold block text-[10px] uppercase">Safe Restore Band</span>
+            <span className="text-emerald-950 font-black text-sm">
+              {isLive ? '≤ 120 VA (-20 VA Hysteresis)' : '≤ 85.0 kW (-5 kW Hysteresis)'}
+            </span>
+          </div>
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-2.5">
+            <span className="text-indigo-800 font-bold block text-[10px] uppercase">Protection State Machine</span>
+            <span className="text-indigo-950 font-black text-sm flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${relays.state === 'NORMAL' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              {relays.state || 'NORMAL'}
+            </span>
+          </div>
+        </div>
+
+        {/* 3 Relay Hardware Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
+
+          {/* RELAY 1: Priority 1 (Turns OFF 1st) */}
+          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs ${
+            ch1.is_shed
+              ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-200'
+              : 'bg-slate-50/80 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="bg-rose-100 text-rose-900 border border-rose-300 font-black text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">
+                PRIORITY 1: TURNS OFF 1ST
+              </span>
+              <span className="text-[11px] font-bold text-slate-500 font-mono">
+                BCM 25 &bull; Pin 22
+              </span>
+            </div>
+
+            <div className="text-sm font-black text-slate-900 mb-0.5">
+              Relay 1: Opportunistic Load
+            </div>
+            <div className="text-xs text-slate-600 mb-3">
+              Feeder 1 &bull; Air Compressor C-02 / HVAC Non-Critical
+            </div>
+
+            {/* Current State Indicator */}
+            <div className="flex items-center justify-between p-2.5 bg-white border rounded-xl mb-3">
+              <span className="text-xs font-bold text-slate-600">Hardware Status</span>
+              <span className={`font-black text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+                ch1.is_shed
+                  ? 'bg-rose-100 text-rose-900 border border-rose-300'
+                  : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${ch1.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
+                {ch1.is_shed ? 'SHED (LOAD OFF)' : 'OPERATIONAL (LOAD ON)'}
+              </span>
+            </div>
+
+            {/* Manual Controls */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleRelayAction(1, 'SHED')}
+                disabled={relayActionLoading !== null || ch1.is_shed}
+                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+              >
+                {relayActionLoading === 1 ? 'Dispatching...' : 'Turn OFF (Shed)'}
+              </button>
+              <button
+                onClick={() => handleRelayAction(1, 'RESTORE')}
+                disabled={relayActionLoading !== null || !ch1.is_shed}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+              >
+                {relayActionLoading === 1 ? 'Dispatching...' : 'Turn ON (Restore)'}
+              </button>
+            </div>
+          </div>
+
+          {/* RELAY 2: Priority 2 (Turns OFF 2nd with 8s delay) */}
+          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs ${
+            ch2.is_shed
+              ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-200'
+              : 'bg-slate-50/80 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="bg-amber-100 text-amber-900 border border-amber-300 font-black text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">
+                PRIORITY 2: TURNS OFF 2ND (8s DWELL)
+              </span>
+              <span className="text-[11px] font-bold text-slate-500 font-mono">
+                BCM 24 &bull; Pin 18
+              </span>
+            </div>
+
+            <div className="text-sm font-black text-slate-900 mb-0.5">
+              Relay 2: Flexible Load
+            </div>
+            <div className="text-xs text-slate-600 mb-3">
+              Feeder 2 &bull; Auxiliary Water Cooling Pumps &amp; Blowers
+            </div>
+
+            {/* Current State Indicator */}
+            <div className="flex items-center justify-between p-2.5 bg-white border rounded-xl mb-3">
+              <span className="text-xs font-bold text-slate-600">Hardware Status</span>
+              <span className={`font-black text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+                ch2.is_shed
+                  ? 'bg-rose-100 text-rose-900 border border-rose-300'
+                  : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${ch2.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
+                {ch2.is_shed ? 'SHED (LOAD OFF)' : 'OPERATIONAL (LOAD ON)'}
+              </span>
+            </div>
+
+            {/* Manual Controls */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleRelayAction(2, 'SHED')}
+                disabled={relayActionLoading !== null || ch2.is_shed}
+                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+              >
+                {relayActionLoading === 2 ? 'Dispatching...' : 'Turn OFF (Shed)'}
+              </button>
+              <button
+                onClick={() => handleRelayAction(2, 'RESTORE')}
+                disabled={relayActionLoading !== null || !ch2.is_shed}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+              >
+                {relayActionLoading === 2 ? 'Dispatching...' : 'Turn ON (Restore)'}
+              </button>
+            </div>
+          </div>
+
+          {/* RELAY 3: Priority 3 (Turns OFF 3rd / Last Resort) */}
+          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs ${
+            ch3.is_shed
+              ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-200'
+              : 'bg-slate-50/80 border-slate-200'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="bg-indigo-100 text-indigo-900 border border-indigo-300 font-black text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">
+                PRIORITY 3: TURNS OFF 3RD (LAST RESORT)
+              </span>
+              <span className="text-[11px] font-bold text-slate-500 font-mono">
+                BCM 23 &bull; Pin 16
+              </span>
+            </div>
+
+            <div className="text-sm font-black text-slate-900 mb-0.5">
+              Relay 3: Core Protected Feeder
+            </div>
+            <div className="text-xs text-slate-600 mb-3">
+              Feeder 3 &bull; Main Production Assembly &amp; CNC Incomer
+            </div>
+
+            {/* Current State Indicator */}
+            <div className="flex items-center justify-between p-2.5 bg-white border rounded-xl mb-3">
+              <span className="text-xs font-bold text-slate-600">Hardware Status</span>
+              <span className={`font-black text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+                ch3.is_shed
+                  ? 'bg-rose-100 text-rose-900 border border-rose-300'
+                  : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${ch3.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
+                {ch3.is_shed ? 'SHED (LOAD OFF)' : 'OPERATIONAL (LOAD ON)'}
+              </span>
+            </div>
+
+            {/* Manual Controls */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => handleRelayAction(3, 'SHED')}
+                disabled={relayActionLoading !== null || ch3.is_shed}
+                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+              >
+                {relayActionLoading === 3 ? 'Dispatching...' : 'Turn OFF (Shed)'}
+              </button>
+              <button
+                onClick={() => handleRelayAction(3, 'RESTORE')}
+                disabled={relayActionLoading !== null || !ch3.is_shed}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer"
+              >
+                {relayActionLoading === 3 ? 'Dispatching...' : 'Turn ON (Restore)'}
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Priority Timing Flow Diagram & Energy Saving Strategy */}
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+          <div className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-2">
+            <span>🔄 Autonomous Staggered Shedding &amp; Reconnection Strategy</span>
+            <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md">
+              Anti-Inrush Interlock
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {/* Shedding Sequence */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3">
+              <div className="font-bold text-rose-950 mb-1.5 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-rose-600"></span>
+                Shedding Sequence (Demand &gt; {isLive ? '140 VA' : '90 kW'} Safe Limit)
+              </div>
+              <div className="flex items-center text-[11px] font-mono font-semibold text-slate-700 gap-1.5 flex-wrap">
+                <span className="bg-rose-100 text-rose-900 px-2 py-1 rounded-md border border-rose-200">
+                  1. Shed Relay 1 (1st)
+                </span>
+                <span>➔ ⏱️ 8s Dwell ➔</span>
+                <span className="bg-amber-100 text-amber-900 px-2 py-1 rounded-md border border-amber-200">
+                  2. Shed Relay 2 (2nd)
+                </span>
+                <span>➔ ⏱️ 8s Dwell ➔</span>
+                <span className="bg-indigo-100 text-indigo-900 px-2 py-1 rounded-md border border-indigo-200">
+                  3. Shed Relay 3 (3rd)
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2">
+                Staggered 8-second dwell prevents unnecessary tripping if shedding Relay 1 immediately brings demand back under the safe operating limit.
+              </p>
+            </div>
+
+            {/* Restoration Sequence */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3">
+              <div className="font-bold text-emerald-950 mb-1.5 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                Reconnection Sequence (Demand &le; {isLive ? '120 VA' : '85 kW'} Safe Band)
+              </div>
+              <div className="flex items-center text-[11px] font-mono font-semibold text-slate-700 gap-1.5 flex-wrap">
+                <span className="bg-indigo-100 text-indigo-900 px-2 py-1 rounded-md border border-indigo-200">
+                  1. Restore Relay 3 (1st)
+                </span>
+                <span>➔ ⏱️ 10s Surge Delay ➔</span>
+                <span className="bg-amber-100 text-amber-900 px-2 py-1 rounded-md border border-amber-200">
+                  2. Restore Relay 2 (2nd)
+                </span>
+                <span>➔ ⏱️ 10s Surge Delay ➔</span>
+                <span className="bg-rose-100 text-rose-900 px-2 py-1 rounded-md border border-rose-200">
+                  3. Restore Relay 1 (3rd)
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-2">
+                Restoring core loads first with 10-second spacing mitigates motor starting inrush currents and prevents ceiling boundary overshoot.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* =================================================================== */}
