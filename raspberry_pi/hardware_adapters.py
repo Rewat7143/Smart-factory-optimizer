@@ -343,21 +343,26 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
 
     def __init__(self, config: Optional[TelemetryConfig] = None):
         self.config = config or default_config
-        self.pins = {
-            1: self.config.relay_1_pin,
-            2: self.config.relay_2_pin,
-            3: self.config.relay_3_pin
+        r1 = getattr(self.config, "relay_1_pins", None) or ([self.config.relay_1_pin] if self.config.relay_1_pin else [9, 21])
+        r2 = getattr(self.config, "relay_2_pins", None) or ([self.config.relay_2_pin] if self.config.relay_2_pin else [25, 22, 24])
+        r3 = getattr(self.config, "relay_3_pins", None) or ([self.config.relay_3_pin] if self.config.relay_3_pin else [11, 23])
+
+        self.pins: Dict[int, List[int]] = {
+            1: list(r1),
+            2: list(r2),
+            3: list(r3)
         }
         self.active_low = self.config.relay_active_low
         self.monitor_only = self.config.relay_monitor_only
         self.states = {1: False, 2: False, 3: False}
         self._gpio_initialized = False
+        self.current_preset = "DUAL_DRIVE_ALL"
 
     def initialize(self) -> bool:
-        configured_pins = [p for p in self.pins.values() if p is not None]
-        if not configured_pins:
+        all_pins = [p for p_list in self.pins.values() for p in p_list if p is not None]
+        if not all_pins:
             logger.info(
-                "[RPi4B Relay Adapter] No GPIO pins configured in environment (RELAY_1_PIN, etc.). "
+                "[RPi4B Relay Adapter] No GPIO pins configured in environment. "
                 "Operating in safe virtual MONITOR_ONLY mode."
             )
             return True
@@ -379,12 +384,12 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
         try:
             GPIO.setmode(GPIO.BCM)
             GPIO.setwarnings(False)
-            for ch, pin in self.pins.items():
-                if pin is not None:
-                    # Initial operating state: relays energized / contacts closed (active-low: LOW = on)
-                    init_level = GPIO.LOW if self.active_low else GPIO.HIGH
-                    GPIO.setup(pin, GPIO.OUT, initial=init_level)
-                    logger.info(f"[RPi4B Relay Adapter] Relay channel {ch} setup on BCM GPIO {pin} (initially energized/ON).")
+            init_level = GPIO.LOW if self.active_low else GPIO.HIGH
+            for ch, p_list in self.pins.items():
+                for pin in p_list:
+                    if pin is not None:
+                        GPIO.setup(pin, GPIO.OUT, initial=init_level)
+                        logger.info(f"[RPi4B Relay Adapter] Relay channel {ch} setup on BCM GPIO {pin} (initial level={init_level}).")
             self._gpio_initialized = True
             return True
         except Exception as e:
@@ -397,29 +402,22 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
             return False
 
         self.states[channel] = state
-        pin = self.pins.get(channel)
+        pins = self.pins.get(channel, [])
 
-        if self.monitor_only or pin is None or not self._gpio_initialized:
-            # Virtual/monitor-only mode: record state and log
+        if self.monitor_only or not pins or not self._gpio_initialized:
             action_desc = "SHED (OFF / DISCONNECTED)" if state else "RESTORED (ON / CONNECTED)"
             logger.info(
                 f"[MONITOR_ONLY] Relay channel {channel} {action_desc}. "
-                f"Physical pin {pin} unactuated."
+                f"Physical pins {pins} unactuated."
             )
             return True
 
-        # Active hardware actuation:
-        # state == True -> SHED (Turn OFF load) -> active-low: GPIO.HIGH (de-energize coil)
-        # state == False -> RESTORE (Turn ON load) -> active-low: GPIO.LOW (energize coil)
         try:
-            if self.active_low:
-                level = GPIO.HIGH if state else GPIO.LOW
-            else:
-                level = GPIO.LOW if state else GPIO.HIGH
-
-            GPIO.output(pin, level)
+            level = (GPIO.HIGH if state else GPIO.LOW) if self.active_low else (GPIO.LOW if state else GPIO.HIGH)
+            for pin in pins:
+                GPIO.output(pin, level)
             logger.info(
-                f"[RPi4B Relay Adapter] Actuated Relay {channel} (BCM {pin}) -> Level "
+                f"[RPi4B Relay Adapter] Actuated Relay {channel} (BCM Pins {pins}) -> Level "
                 f"{'HIGH (3.3V)' if level == GPIO.HIGH else 'LOW (0V)'} (Load {'SHED/OFF' if state else 'RESTORED/ON'}, Active-Low={self.active_low})."
             )
             return True
@@ -435,6 +433,21 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
             for ch, state in self.states.items():
                 self.set_relay(ch, state)
 
+    def set_pin_preset(self, preset: str) -> None:
+        """Switch pin mapping presets dynamically."""
+        logger.info(f"[RPi4B Relay Adapter] Switching pin preset to {preset}...")
+        self.current_preset = preset
+        if preset in ("PHYSICAL_21_22_23", "HEADER_21_22_23"):
+            self.pins = {1: [9], 2: [25], 3: [11]}
+        elif preset == "BCM_21_22_23":
+            self.pins = {1: [21], 2: [22], 3: [23]}
+        elif preset == "BCM_25_24_23":
+            self.pins = {1: [25], 2: [24], 3: [23]}
+        else:
+            # DUAL_DRIVE_ALL: simultaneous drive of all candidates
+            self.pins = {1: [9, 21], 2: [25, 22, 24], 3: [11, 23]}
+        self.initialize()
+
     def test_pulse(self, cycles: int = 3) -> None:
         """Rapidly toggles all configured relays so the user can visually verify LEDs and hear clicks."""
         if not self._gpio_initialized or self.monitor_only or not RPI_GPIO_AVAILABLE:
@@ -444,19 +457,20 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
         import time
         logger.info("[RPi4B Relay Adapter] Executing diagnostic test pulse on all relay pins...")
         try:
+            all_active_pins = []
+            for p_list in self.pins.values():
+                all_active_pins.extend(p_list)
+            all_active_pins = list(set(all_active_pins))
+
             for i in range(cycles):
                 # Cycle LOW (0V)
-                for ch, pin in self.pins.items():
-                    if pin is not None:
-                        GPIO.setup(pin, GPIO.OUT)
-                        GPIO.output(pin, GPIO.LOW)
+                for pin in all_active_pins:
+                    GPIO.output(pin, GPIO.LOW)
                 time.sleep(0.4)
 
                 # Cycle HIGH (3.3V)
-                for ch, pin in self.pins.items():
-                    if pin is not None:
-                        GPIO.setup(pin, GPIO.OUT)
-                        GPIO.output(pin, GPIO.HIGH)
+                for pin in all_active_pins:
+                    GPIO.output(pin, GPIO.HIGH)
                 time.sleep(0.4)
 
             # Re-apply tracked state
@@ -472,10 +486,9 @@ class RaspberryPi4BRelayAdapter(BaseRelayAdapter):
     def cleanup(self) -> None:
         if self._gpio_initialized and RPI_GPIO_AVAILABLE:
             try:
-                # Reset all configured pins to safe de-energized state
-                for pin in self.pins.values():
-                    if pin is not None:
-                        safe_level = GPIO.HIGH if self.active_low else GPIO.LOW
+                safe_level = GPIO.HIGH if self.active_low else GPIO.LOW
+                for p_list in self.pins.values():
+                    for pin in p_list:
                         GPIO.output(pin, safe_level)
                 GPIO.cleanup()
                 logger.info("[RPi4B Relay Adapter] GPIO pins reset to safe de-energized state.")

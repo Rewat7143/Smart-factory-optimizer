@@ -20,10 +20,11 @@ try:
 
     # 1. Upload updated files
     with SCPClient(ssh.get_transport()) as scp:
-        for f in ["normalizer.py", "api_client.py", "hardware_adapters.py", "main.py"]:
+        for f in ["config.py", "hardware_adapters.py", "relay_control.py", ".env", "normalizer.py", "api_client.py", "main.py"]:
             local_f = os.path.join(LOCAL_DIR, f)
-            print(f"Uploading {f}...")
-            scp.put(local_f, remote_path=REMOTE_DIR)
+            if os.path.exists(local_f):
+                print(f"Uploading {f}...")
+                scp.put(local_f, remote_path=REMOTE_DIR)
 
     # 2. Clear any old stuck NaN records in sqlite queue
     clean_sql = (

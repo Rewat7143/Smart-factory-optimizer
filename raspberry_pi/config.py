@@ -74,10 +74,13 @@ class TelemetryConfig:
         self.relay_mode: str = os.getenv("RELAY_MODE", "MONITOR_ONLY").upper()  # 'MONITOR_ONLY' or 'ACTIVE'
         self.relay_monitor_only: bool = (self.relay_mode != "ACTIVE")
 
-        # Relay GPIO Pin Mapping (None if unconfigured)
-        self.relay_1_pin: Optional[int] = self._parse_optional_int(os.getenv("RELAY_1_PIN"))
-        self.relay_2_pin: Optional[int] = self._parse_optional_int(os.getenv("RELAY_2_PIN"))
-        self.relay_3_pin: Optional[int] = self._parse_optional_int(os.getenv("RELAY_3_PIN"))
+        # Relay GPIO Pin Mapping (Supports single pin or comma-separated list)
+        self.relay_1_pins: list = self._parse_pin_list(os.getenv("RELAY_1_PIN", "9,21"))
+        self.relay_2_pins: list = self._parse_pin_list(os.getenv("RELAY_2_PIN", "25,22,24"))
+        self.relay_3_pins: list = self._parse_pin_list(os.getenv("RELAY_3_PIN", "11,23"))
+        self.relay_1_pin: Optional[int] = self.relay_1_pins[0] if self.relay_1_pins else 9
+        self.relay_2_pin: Optional[int] = self.relay_2_pins[0] if self.relay_2_pins else 25
+        self.relay_3_pin: Optional[int] = self.relay_3_pins[0] if self.relay_3_pins else 11
         self.relay_active_low: bool = os.getenv("RELAY_ACTIVE_LOW", "true").lower() in ("true", "1", "yes")
 
         # Peak-Demand State Machine Thresholds (None if unconfigured)
@@ -90,6 +93,17 @@ class TelemetryConfig:
         # 7. Logging
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
         self.log_file: Optional[str] = os.getenv("LOG_FILE", str(Path(__file__).parent / "telemetry_service.log"))
+
+    @staticmethod
+    def _parse_pin_list(val: Optional[str]) -> list:
+        if val is None or val.strip() == "":
+            return []
+        pins = []
+        for p in val.split(","):
+            p_clean = p.strip()
+            if p_clean.isdigit():
+                pins.append(int(p_clean))
+        return pins
 
     @staticmethod
     def _parse_optional_int(val: Optional[str]) -> Optional[int]:

@@ -420,6 +420,7 @@ export default function FieldEngineerPictorialView() {
 
   const controlMode = relays.control_mode || 'AUTO'
   const isActiveLow = relays.active_low !== false
+  const pinPreset = relays.pin_preset || 'DUAL_DRIVE_ALL'
 
   const ch1 = relays.channels?.[1] || relays.channels?.["1"] || { channel_id: 1, name: "Relay 1 (Opportunistic Load)", priority: 1, is_shed: false, state: "OPERATIONAL" }
   const ch2 = relays.channels?.[2] || relays.channels?.["2"] || { channel_id: 2, name: "Relay 2 (Flexible Load)", priority: 2, is_shed: false, state: "OPERATIONAL" }
@@ -760,7 +761,7 @@ export default function FieldEngineerPictorialView() {
               </span>
               <span className="text-[11px] font-black bg-emerald-100 text-emerald-950 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                ACTIVE HARDWARE ACTUATION (BCM 25, 24, 23)
+                ACTIVE HARDWARE (Pins 21, 22, 23 • BCM 9, 25, 11)
               </span>
               <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
                 controlMode === 'MANUAL'
@@ -776,6 +777,34 @@ export default function FieldEngineerPictorialView() {
             <p className="text-xs font-semibold text-slate-500">
               Autonomous Edge Interlocking: Prioritized Shedding (Relay 1 ➔ 2 ➔ 3) with 8s Dwell Delay &amp; 10s Anti-Surge Reconnection
             </p>
+
+            {/* Dynamic Pin Mapping Preset Selector */}
+            <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-slate-100">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">GPIO Pin Preset:</span>
+              {[
+                { id: 'DUAL_DRIVE_ALL', label: '⚡ Dual-Drive All (Pins 21, 22, 23 + BCM 21, 22, 23)', title: 'Drives physical Header Pins 21, 22, 23 AND BCM pins simultaneously' },
+                { id: 'PHYSICAL_21_22_23', label: '📌 Header Pins 21, 22, 23 (BCM 9, 25, 11)', title: 'Physical 40-pin header pins 21, 22, 23' },
+                { id: 'BCM_21_22_23', label: '🔢 BCM GPIO 21, 22, 23', title: 'Logical BCM GPIO numbers 21, 22, 23' },
+                { id: 'BCM_25_24_23', label: '⏮️ Legacy BCM 25, 24, 23', title: 'Original default pin configuration' },
+              ].map((p) => {
+                const isSelected = pinPreset === p.id
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handleRelayAction(null, `SET_PIN_PRESET_${p.id}`)}
+                    disabled={relayActionLoading !== null}
+                    title={p.title}
+                    className={`text-[10px] font-black px-2 py-0.5 rounded-lg border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs ring-1 ring-indigo-400'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           {/* Master Control & Feedback */}
@@ -882,7 +911,7 @@ export default function FieldEngineerPictorialView() {
                 PRIORITY 1: TURNS OFF 1ST
               </span>
               <span className="text-[11px] font-bold text-slate-500 font-mono">
-                BCM 25 &bull; <strong className="text-indigo-700">Pin 22</strong>
+                Pin 21 &bull; <strong className="text-indigo-700">BCM 9 / 21</strong>
               </span>
             </div>
 
@@ -936,7 +965,7 @@ export default function FieldEngineerPictorialView() {
                 PRIORITY 2: TURNS OFF 2ND (8s DWELL)
               </span>
               <span className="text-[11px] font-bold text-slate-500 font-mono">
-                BCM 24 &bull; <strong className="text-indigo-700">Pin 18</strong>
+                Pin 22 &bull; <strong className="text-indigo-700">BCM 25 / 22</strong>
               </span>
             </div>
 
@@ -990,7 +1019,7 @@ export default function FieldEngineerPictorialView() {
                 PRIORITY 3: TURNS OFF 3RD (LAST RESORT)
               </span>
               <span className="text-[11px] font-bold text-slate-500 font-mono">
-                BCM 23 &bull; <strong className="text-indigo-700">Pin 16</strong>
+                Pin 23 &bull; <strong className="text-indigo-700">BCM 11 / 23</strong>
               </span>
             </div>
 
@@ -1049,18 +1078,18 @@ export default function FieldEngineerPictorialView() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs mb-3">
             <div className="bg-white border rounded-xl p-2.5">
               <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 1 (Feeder 1)</span>
-              <span className="text-indigo-950 font-black text-sm">Header Pin 22</span>
-              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 25</span>
+              <span className="text-indigo-950 font-black text-sm">Header Pin 21</span>
+              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 9 (or 21)</span>
             </div>
             <div className="bg-white border rounded-xl p-2.5">
               <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 2 (Feeder 2)</span>
-              <span className="text-indigo-950 font-black text-sm">Header Pin 18</span>
-              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 24</span>
+              <span className="text-indigo-950 font-black text-sm">Header Pin 22</span>
+              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 25 (or 22)</span>
             </div>
             <div className="bg-white border rounded-xl p-2.5">
               <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 3 (Feeder 3)</span>
-              <span className="text-indigo-950 font-black text-sm">Header Pin 16</span>
-              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 23</span>
+              <span className="text-indigo-950 font-black text-sm">Header Pin 23</span>
+              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 11 (or 23)</span>
             </div>
             <div className="bg-white border rounded-xl p-2.5">
               <span className="text-slate-500 font-bold block text-[10px] uppercase">Module Power (VCC)</span>

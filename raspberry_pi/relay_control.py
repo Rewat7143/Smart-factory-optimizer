@@ -228,6 +228,11 @@ class RelayController:
             if hasattr(self.adapter, "test_pulse"):
                 self.adapter.test_pulse()
             return "PULSE_TEST_DONE"
+        elif act_up.startswith("SET_PIN_PRESET_"):
+            preset_name = act_up.replace("SET_PIN_PRESET_", "")
+            if hasattr(self.adapter, "set_pin_preset"):
+                self.adapter.set_pin_preset(preset_name)
+            return f"PIN_PRESET_{preset_name}_APPLIED"
         elif act_up == "EMERGENCY_RESTORE_ALL":
             self.control_mode = "MANUAL"
             self.emergency_restore_all()
@@ -273,6 +278,8 @@ class RelayController:
             "mode": "MONITOR_ONLY" if self.monitor_only else "ACTIVE",
             "control_mode": self.control_mode,
             "active_low": getattr(self.adapter, "active_low", True),
+            "pin_preset": getattr(self.adapter, "current_preset", "DUAL_DRIVE_ALL"),
+            "pins": getattr(self.adapter, "pins", {}),
             "active_power_kw": round(active_power_kw, 3),
             "effective_demand_kw": round(eff_kw, 3),
             "threshold_kw": self.threshold_kw,

@@ -385,6 +385,8 @@ def control_relays(cmd: RelayControlPayload):
             latest_relay_decision["active_low"] = True
         elif act_up == "SET_POLARITY_ACTIVE_HIGH":
             latest_relay_decision["active_low"] = False
+        elif act_up.startswith("SET_PIN_PRESET_"):
+            latest_relay_decision["pin_preset"] = act_up.replace("SET_PIN_PRESET_", "")
 
         if "channels" in latest_relay_decision:
             chs = latest_relay_decision["channels"]

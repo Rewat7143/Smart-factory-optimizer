@@ -161,12 +161,13 @@ class TelemetryService:
 
             # Check if backend forwarded an interactive relay control override
             if hasattr(self.api_client, "last_response_data") and self.api_client.last_response_data:
-                pending_cmd = self.api_client.last_response_data.get("pending_relay_command")
+                pending_cmd = self.api_client.last_response_data.pop("pending_relay_command", None)
                 if pending_cmd:
                     ch = int(pending_cmd.get("channel", 1))
                     act = str(pending_cmd.get("action", ""))
                     logger.info(f"[Remote Dispatch] Received operator command: Channel {ch} -> {act}")
-                    self.relay_controller.manual_command(ch, act)
+                    res = self.relay_controller.manual_command(ch, act)
+                    logger.info(f"[Remote Dispatch] Command {act} executed: {res}")
         else:
             self.queue.record_application_failure(payload["record_id"], api_err or "API Error")
             self.health_monitor.record_app_sync(False, error=api_err)
