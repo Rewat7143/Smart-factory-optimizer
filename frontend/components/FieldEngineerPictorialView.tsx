@@ -746,431 +746,333 @@ export default function FieldEngineerPictorialView() {
       </div>
 
       {/* =================================================================== */}
-      {/* ROW 2.5: PRIORITY RELAY LOAD SHEDDING & CEILING PROTECTION MATRIX   */}
-      {/* 3 Physical Relays on Raspberry Pi (BCM 25, 24, 23)                 */}
-      {/* Priority sequence: Relay 1 OFF 1st -> Relay 2 -> Relay 3            */}
-      {/* Restores in reverse: Relay 3 ON 1st -> Relay 2 -> Relay 1           */}
+      {/* ROW 2.5: SIMPLE LAYMAN FACTORY RELAY & POWER CONTROLLER             */}
       {/* =================================================================== */}
       <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
-        {/* Header with Title, Mode & Master Actions */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 mb-5 border-b border-slate-200 gap-4">
+        {/* Header with Title and 2-3 Action Buttons */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-5 border-b border-slate-200 gap-3">
           <div>
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <span className="text-base md:text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
-                ⚡ Priority Relay Load Shedding &amp; Ceiling Protection Matrix
+            <div className="flex items-center gap-2">
+              <span className="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+                ⚡ Factory Power Switch &amp; Relay Control
               </span>
               <span className="text-[11px] font-black bg-emerald-100 text-emerald-950 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-2xs">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                ACTIVE HARDWARE (Pins 21, 22, 23 • BCM 9, 25, 11)
-              </span>
-              <span className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
-                controlMode === 'MANUAL'
-                  ? 'bg-amber-100 text-amber-950 border-amber-300'
-                  : 'bg-indigo-100 text-indigo-950 border-indigo-200'
-              }`}>
-                Control: {controlMode === 'MANUAL' ? '🖐️ MANUAL SCADA' : '🤖 AUTONOMOUS AI'}
-              </span>
-              <span className="text-[11px] font-black bg-slate-100 text-slate-800 border border-slate-300 px-2.5 py-0.5 rounded-full">
-                Polarity: {isActiveLow ? 'Active-LOW (0V=ON)' : 'Active-HIGH / NC (3.3V=ON)'}
+                Hardware Active
               </span>
             </div>
-            <p className="text-xs font-semibold text-slate-500">
-              Autonomous Edge Interlocking: Prioritized Shedding (Relay 1 ➔ 2 ➔ 3) with 8s Dwell Delay &amp; 10s Anti-Surge Reconnection
+            <p className="text-xs font-semibold text-slate-500 mt-0.5">
+              Turn factory loads on/off and automatically protect against ceiling overload.
             </p>
-
-            {/* Dynamic Pin Mapping Preset Selector */}
-            <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-slate-100">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">GPIO Pin Preset:</span>
-              {[
-                { id: 'DUAL_DRIVE_ALL', label: '⚡ Dual-Drive All (Pins 21, 22, 23 + BCM 21, 22, 23)', title: 'Drives physical Header Pins 21, 22, 23 AND BCM pins simultaneously' },
-                { id: 'PHYSICAL_21_22_23', label: '📌 Header Pins 21, 22, 23 (BCM 9, 25, 11)', title: 'Physical 40-pin header pins 21, 22, 23' },
-                { id: 'BCM_21_22_23', label: '🔢 BCM GPIO 21, 22, 23', title: 'Logical BCM GPIO numbers 21, 22, 23' },
-                { id: 'BCM_25_24_23', label: '⏮️ Legacy BCM 25, 24, 23', title: 'Original default pin configuration' },
-              ].map((p) => {
-                const isSelected = pinPreset === p.id
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => handleRelayAction(null, `SET_PIN_PRESET_${p.id}`)}
-                    disabled={relayActionLoading !== null}
-                    title={p.title}
-                    className={`text-[10px] font-black px-2 py-0.5 rounded-lg border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs ring-1 ring-indigo-400'
-                        : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                )
-              })}
-            </div>
           </div>
 
-          {/* Master Control & Feedback */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          {/* Just 2-3 Master Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
             {relayMessage && (
               <span className="text-xs font-black text-indigo-900 bg-indigo-50 border border-indigo-300 px-3 py-1.5 rounded-xl shadow-xs animate-fade-in">
                 {relayMessage}
               </span>
             )}
 
-            {/* Mode Toggle Button */}
+            {/* 1. All Power ON Button */}
+            <button
+              onClick={() => handleRelayAction(null, 'EMERGENCY_RESTORE_ALL')}
+              disabled={relayActionLoading !== null}
+              className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2 px-3.5 rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
+              title="Turn ON all factory loads"
+            >
+              {relayActionLoading === 'EMERGENCY_RESTORE_ALL' ? 'Restoring...' : '🟢 Power ON All'}
+            </button>
+
+            {/* 2. Test Hardware Clicks */}
+            <button
+              onClick={() => handleRelayAction(null, 'TEST_PULSE')}
+              disabled={relayActionLoading !== null}
+              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-950 font-black text-xs py-2 px-3 rounded-xl border border-indigo-300 cursor-pointer disabled:opacity-50 transition-all"
+              title="Test hardware clicks and blink LEDs"
+            >
+              ⚡ Test Clicks
+            </button>
+
+            {/* 3. Auto Safety Toggle */}
             <button
               onClick={() => handleRelayAction(null, controlMode === 'MANUAL' ? 'SET_MODE_AUTO' : 'SET_MODE_MANUAL')}
               disabled={relayActionLoading !== null}
               className={`font-black text-xs py-2 px-3 rounded-xl border transition-all cursor-pointer ${
                 controlMode === 'MANUAL'
-                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700 shadow-sm'
-                  : 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
+                  ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700 shadow-sm'
+              }`}
+              title="Toggle automatic load protection"
+            >
+              {controlMode === 'MANUAL' ? '🖐️ Manual (Click for Auto)' : '🤖 Auto Protection: ON'}
+            </button>
+          </div>
+        </div>
+
+        {/* Visual Layman Progress Bar */}
+        {(() => {
+          const currentLoad = isLive ? (powerVa || powerWatts) : powerKw
+          const loadUnit = isLive ? 'VA' : 'kW'
+          const maxCeiling = isLive ? 200 : 100
+          const safeThreshold = isLive ? 140 : 90
+          const currentPercent = Math.min(100, Math.max(0, Math.round((currentLoad / maxCeiling) * 100)))
+          const isOverSafe = currentLoad >= safeThreshold
+          const isOverCeiling = currentLoad >= maxCeiling
+          const anyShed = ch1.is_shed || ch2.is_shed || ch3.is_shed
+
+          return (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-5">
+              {/* Load Numbers Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    Current Factory Load:
+                  </span>
+                  <span className="text-lg font-black text-slate-900">
+                    {currentLoad.toFixed(1)} {loadUnit}
+                  </span>
+                  <span className="text-xs font-bold text-slate-500">
+                    ({currentPercent}% of limit)
+                  </span>
+                </div>
+
+                <div className="text-xs font-bold text-slate-600 flex items-center gap-3">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Safe Trip Limit: {safeThreshold} {loadUnit}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    Max Ceiling: {maxCeiling} {loadUnit}
+                  </span>
+                </div>
+              </div>
+
+              {/* Progress Bar Track */}
+              <div className="w-full bg-slate-200 h-4 rounded-full overflow-hidden relative shadow-inner">
+                {/* 70% Safe Limit Marker Line */}
+                <div
+                  className="absolute top-0 bottom-0 w-0.5 bg-slate-400 z-10"
+                  style={{ left: `${(safeThreshold / maxCeiling) * 100}%` }}
+                  title={`Safe Limit: ${safeThreshold} ${loadUnit}`}
+                />
+
+                {/* Animated Dynamic Fill */}
+                <div
+                  className={`h-full transition-all duration-700 rounded-full ${
+                    isOverCeiling
+                      ? 'bg-rose-500 animate-pulse'
+                      : isOverSafe
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${currentPercent}%` }}
+                />
+              </div>
+
+              {/* Plain English Status Message */}
+              <div className="flex items-center justify-between mt-2.5 text-xs font-bold">
+                <div className="flex items-center gap-2">
+                  {anyShed ? (
+                    <span className="text-rose-700 bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-md flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping"></span>
+                      ⚠️ Load Tripped: Machine turned off to prevent penalty.
+                    </span>
+                  ) : isOverSafe ? (
+                    <span className="text-amber-800 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-600 animate-pulse"></span>
+                      🟡 High Load: Ready to automatically protect limit.
+                    </span>
+                  ) : (
+                    <span className="text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                      🟢 Normal Operating Zone: Power is safe and optimal.
+                    </span>
+                  )}
+                </div>
+
+                <span className="text-slate-500 text-[11px]">
+                  {maxCeiling - currentLoad > 0 ? `${(maxCeiling - currentLoad).toFixed(1)} ${loadUnit} buffer remaining` : 'Limit reached'}
+                </span>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* 3 Simple Load Switches */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+          {/* LOAD 1 */}
+          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs flex flex-col justify-between ${
+            ch1.is_shed
+              ? 'bg-rose-50/80 border-rose-300 ring-2 ring-rose-200'
+              : 'bg-slate-50 border-slate-200'
+          }`}>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  Switch 1 (Trips 1st)
+                </span>
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                  ch1.is_shed ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${ch1.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
+                  {ch1.is_shed ? 'OFF' : 'ON (RUNNING)'}
+                </span>
+              </div>
+              <div className="text-sm font-black text-slate-900">
+                Load 1: Air Compressor
+              </div>
+              <div className="text-xs text-slate-500 mb-4">
+                Non-critical equipment (Pin 21)
+              </div>
+            </div>
+
+            <button
+              onClick={() => handleRelayAction(1, ch1.is_shed ? 'RESTORE' : 'SHED')}
+              disabled={relayActionLoading !== null}
+              className={`w-full font-black text-xs py-2.5 px-3 rounded-xl transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 ${
+                ch1.is_shed
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white'
               }`}
             >
-              {controlMode === 'MANUAL' ? '🤖 Switch to Auto Interlock' : '🖐️ Switch to Manual SCADA'}
-            </button>
-
-            {/* Polarity Inversion Toggle */}
-            <button
-              onClick={() => handleRelayAction(null, isActiveLow ? 'SET_POLARITY_ACTIVE_HIGH' : 'SET_POLARITY_ACTIVE_LOW')}
-              disabled={relayActionLoading !== null}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xs py-2 px-3 rounded-xl border border-slate-300 transition-all cursor-pointer"
-              title="Toggle relay trigger logic between Active-Low and Active-High / NC"
-            >
-              🔄 Flip Polarity ({isActiveLow ? 'Set Active-High' : 'Set Active-Low'})
-            </button>
-
-            {/* Hardware Test Pulse */}
-            <button
-              onClick={() => handleRelayAction(null, 'TEST_PULSE')}
-              disabled={relayActionLoading !== null}
-              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-950 font-black text-xs py-2 px-3 rounded-xl border border-indigo-300 transition-all cursor-pointer"
-              title="Rapidly pulses all relays to verify board LEDs and clicks"
-            >
-              ⚡ Test Pulse (Blink LEDs)
-            </button>
-
-            {/* Master Emergency Restore */}
-            <button
-              onClick={() => handleRelayAction(null, 'EMERGENCY_RESTORE_ALL')}
-              disabled={relayActionLoading !== null}
-              className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-3.5 rounded-xl shadow-sm flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
-            >
-              {relayActionLoading === 'EMERGENCY_RESTORE_ALL' ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  Restoring...
-                </>
-              ) : (
-                <>
-                  <span>🚨 Restore All</span>
-                </>
-              )}
+              {relayActionLoading === (ch1.is_shed ? '1_RESTORE' : '1_SHED')
+                ? 'Switching...'
+                : ch1.is_shed
+                ? '🟢 Turn ON'
+                : '🔴 Turn OFF'}
             </button>
           </div>
-        </div>
 
-        {/* Operating Thresholds Banner */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5 text-xs">
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
-            <span className="text-slate-500 font-bold block text-[10px] uppercase">Peak Demand Ceiling</span>
-            <span className="text-slate-900 font-black text-sm">
-              {isLive ? '200 VA (Max Sanctioned)' : '100 kW (HT Limit)'}
-            </span>
-          </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5">
-            <span className="text-amber-800 font-bold block text-[10px] uppercase">Safe Trip Threshold</span>
-            <span className="text-amber-950 font-black text-sm">
-              {isLive ? '140 VA (Relay 1 Trips)' : '90.0 kW (Relay 1 Trips)'}
-            </span>
-          </div>
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
-            <span className="text-emerald-800 font-bold block text-[10px] uppercase">Safe Restore Band</span>
-            <span className="text-emerald-950 font-black text-sm">
-              {isLive ? '≤ 120 VA (-20 VA Hysteresis)' : '≤ 85.0 kW (-5 kW Hysteresis)'}
-            </span>
-          </div>
-          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-2.5">
-            <span className="text-indigo-800 font-bold block text-[10px] uppercase">Protection State Machine</span>
-            <span className="text-indigo-950 font-black text-sm flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${relays.state === 'NORMAL' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-              {relays.state || 'NORMAL'}
-            </span>
-          </div>
-        </div>
-
-        {/* 3 Relay Hardware Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
-
-          {/* RELAY 1: Priority 1 (Turns OFF 1st) */}
-          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs ${
-            ch1.is_shed
-              ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-200'
-              : 'bg-slate-50/80 border-slate-200'
-          }`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="bg-rose-100 text-rose-900 border border-rose-300 font-black text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">
-                PRIORITY 1: TURNS OFF 1ST
-              </span>
-              <span className="text-[11px] font-bold text-slate-500 font-mono">
-                Pin 21 &bull; <strong className="text-indigo-700">BCM 9 / 21</strong>
-              </span>
-            </div>
-
-            <div className="text-sm font-black text-slate-900 mb-0.5">
-              Relay 1: Opportunistic Load
-            </div>
-            <div className="text-xs text-slate-600 mb-3">
-              Feeder 1 &bull; Air Compressor C-02 / HVAC Non-Critical
-            </div>
-
-            {/* Current State Indicator */}
-            <div className="flex items-center justify-between p-2.5 bg-white border rounded-xl mb-3">
-              <span className="text-xs font-bold text-slate-600">Hardware Status</span>
-              <span className={`font-black text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
-                ch1.is_shed
-                  ? 'bg-rose-100 text-rose-900 border border-rose-300'
-                  : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
-              }`}>
-                <span className={`w-2 h-2 rounded-full ${ch1.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
-                {ch1.is_shed ? 'SHED (LOAD OFF)' : 'OPERATIONAL (LOAD ON)'}
-              </span>
-            </div>
-
-            {/* Manual Controls - Always clickable */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => handleRelayAction(1, 'SHED')}
-                disabled={relayActionLoading !== null}
-                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
-              >
-                {relayActionLoading === '1_SHED' ? 'Dispatching...' : 'Turn OFF (Shed)'}
-              </button>
-              <button
-                onClick={() => handleRelayAction(1, 'RESTORE')}
-                disabled={relayActionLoading !== null}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
-              >
-                {relayActionLoading === '1_RESTORE' ? 'Dispatching...' : 'Turn ON (Restore)'}
-              </button>
-            </div>
-          </div>
-
-          {/* RELAY 2: Priority 2 (Turns OFF 2nd with 8s delay) */}
-          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs ${
+          {/* LOAD 2 */}
+          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs flex flex-col justify-between ${
             ch2.is_shed
-              ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-200'
-              : 'bg-slate-50/80 border-slate-200'
+              ? 'bg-rose-50/80 border-rose-300 ring-2 ring-rose-200'
+              : 'bg-slate-50 border-slate-200'
           }`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="bg-amber-100 text-amber-900 border border-amber-300 font-black text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">
-                PRIORITY 2: TURNS OFF 2ND (8s DWELL)
-              </span>
-              <span className="text-[11px] font-bold text-slate-500 font-mono">
-                Pin 22 &bull; <strong className="text-indigo-700">BCM 25 / 22</strong>
-              </span>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  Switch 2 (Trips 2nd)
+                </span>
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                  ch2.is_shed ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${ch2.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
+                  {ch2.is_shed ? 'OFF' : 'ON (RUNNING)'}
+                </span>
+              </div>
+              <div className="text-sm font-black text-slate-900">
+                Load 2: Cooling Pumps
+              </div>
+              <div className="text-xs text-slate-500 mb-4">
+                Secondary water pump (Pin 22)
+              </div>
             </div>
 
-            <div className="text-sm font-black text-slate-900 mb-0.5">
-              Relay 2: Flexible Load
-            </div>
-            <div className="text-xs text-slate-600 mb-3">
-              Feeder 2 &bull; Auxiliary Water Cooling Pumps &amp; Blowers
-            </div>
-
-            {/* Current State Indicator */}
-            <div className="flex items-center justify-between p-2.5 bg-white border rounded-xl mb-3">
-              <span className="text-xs font-bold text-slate-600">Hardware Status</span>
-              <span className={`font-black text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+            <button
+              onClick={() => handleRelayAction(2, ch2.is_shed ? 'RESTORE' : 'SHED')}
+              disabled={relayActionLoading !== null}
+              className={`w-full font-black text-xs py-2.5 px-3 rounded-xl transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 ${
                 ch2.is_shed
-                  ? 'bg-rose-100 text-rose-900 border border-rose-300'
-                  : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
-              }`}>
-                <span className={`w-2 h-2 rounded-full ${ch2.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
-                {ch2.is_shed ? 'SHED (LOAD OFF)' : 'OPERATIONAL (LOAD ON)'}
-              </span>
-            </div>
-
-            {/* Manual Controls - Always clickable */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => handleRelayAction(2, 'SHED')}
-                disabled={relayActionLoading !== null}
-                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
-              >
-                {relayActionLoading === '2_SHED' ? 'Dispatching...' : 'Turn OFF (Shed)'}
-              </button>
-              <button
-                onClick={() => handleRelayAction(2, 'RESTORE')}
-                disabled={relayActionLoading !== null}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
-              >
-                {relayActionLoading === '2_RESTORE' ? 'Dispatching...' : 'Turn ON (Restore)'}
-              </button>
-            </div>
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white'
+              }`}
+            >
+              {relayActionLoading === (ch2.is_shed ? '2_RESTORE' : '2_SHED')
+                ? 'Switching...'
+                : ch2.is_shed
+                ? '🟢 Turn ON'
+                : '🔴 Turn OFF'}
+            </button>
           </div>
 
-          {/* RELAY 3: Priority 3 (Turns OFF 3rd / Last Resort) */}
-          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs ${
+          {/* LOAD 3 */}
+          <div className={`rounded-2xl p-4 border-2 transition-all shadow-xs flex flex-col justify-between ${
             ch3.is_shed
-              ? 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-200'
-              : 'bg-slate-50/80 border-slate-200'
+              ? 'bg-rose-50/80 border-rose-300 ring-2 ring-rose-200'
+              : 'bg-slate-50 border-slate-200'
           }`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="bg-indigo-100 text-indigo-900 border border-indigo-300 font-black text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">
-                PRIORITY 3: TURNS OFF 3RD (LAST RESORT)
-              </span>
-              <span className="text-[11px] font-bold text-slate-500 font-mono">
-                Pin 23 &bull; <strong className="text-indigo-700">BCM 11 / 23</strong>
-              </span>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  Switch 3 (Protected)
+                </span>
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                  ch3.is_shed ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${ch3.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
+                  {ch3.is_shed ? 'OFF' : 'ON (RUNNING)'}
+                </span>
+              </div>
+              <div className="text-sm font-black text-slate-900">
+                Load 3: Main Production
+              </div>
+              <div className="text-xs text-slate-500 mb-4">
+                Core machines feeder (Pin 23)
+              </div>
             </div>
 
-            <div className="text-sm font-black text-slate-900 mb-0.5">
-              Relay 3: Core Protected Feeder
-            </div>
-            <div className="text-xs text-slate-600 mb-3">
-              Feeder 3 &bull; Main Production Assembly &amp; CNC Incomer
-            </div>
-
-            {/* Current State Indicator */}
-            <div className="flex items-center justify-between p-2.5 bg-white border rounded-xl mb-3">
-              <span className="text-xs font-bold text-slate-600">Hardware Status</span>
-              <span className={`font-black text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 ${
+            <button
+              onClick={() => handleRelayAction(3, ch3.is_shed ? 'RESTORE' : 'SHED')}
+              disabled={relayActionLoading !== null}
+              className={`w-full font-black text-xs py-2.5 px-3 rounded-xl transition-all cursor-pointer shadow-xs active:scale-95 disabled:opacity-50 ${
                 ch3.is_shed
-                  ? 'bg-rose-100 text-rose-900 border border-rose-300'
-                  : 'bg-emerald-100 text-emerald-950 border border-emerald-300'
-              }`}>
-                <span className={`w-2 h-2 rounded-full ${ch3.is_shed ? 'bg-rose-600' : 'bg-emerald-500 animate-pulse'}`}></span>
-                {ch3.is_shed ? 'SHED (LOAD OFF)' : 'OPERATIONAL (LOAD ON)'}
-              </span>
-            </div>
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  : 'bg-rose-600 hover:bg-rose-700 text-white'
+              }`}
+            >
+              {relayActionLoading === (ch3.is_shed ? '3_RESTORE' : '3_SHED')
+                ? 'Switching...'
+                : ch3.is_shed
+                ? '🟢 Turn ON'
+                : '🔴 Turn OFF'}
+            </button>
+          </div>
+        </div>
 
-            {/* Manual Controls - Always clickable */}
-            <div className="grid grid-cols-2 gap-2">
+        {/* Collapsible Advanced Settings (Kept tucked away for technicians) */}
+        <details className="text-xs text-slate-500 mt-2 cursor-pointer group">
+          <summary className="font-bold text-slate-400 hover:text-slate-600 select-none flex items-center gap-1.5 py-1">
+            <span>⚙️ Advanced Hardware &amp; Pin Settings (Technician View)</span>
+          </summary>
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 mt-2 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold text-slate-700">GPIO Pin Preset:</span>
+              {[
+                { id: 'DUAL_DRIVE_ALL', label: '⚡ Dual-Drive (Pins 21, 22, 23 + BCM)' },
+                { id: 'PHYSICAL_21_22_23', label: '📌 Header 21, 22, 23' },
+                { id: 'BCM_21_22_23', label: '🔢 BCM 21, 22, 23' },
+                { id: 'BCM_25_24_23', label: '⏮️ Legacy BCM 25, 24, 23' },
+              ].map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => handleRelayAction(null, `SET_PIN_PRESET_${p.id}`)}
+                  disabled={relayActionLoading !== null}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                    pinPreset === p.id
+                      ? 'bg-indigo-600 text-white border-indigo-700'
+                      : 'bg-white text-slate-700 border-slate-300'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+
               <button
-                onClick={() => handleRelayAction(3, 'SHED')}
+                onClick={() => handleRelayAction(null, isActiveLow ? 'SET_POLARITY_ACTIVE_HIGH' : 'SET_POLARITY_ACTIVE_LOW')}
                 disabled={relayActionLoading !== null}
-                className="bg-rose-600 hover:bg-rose-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
+                className="ml-auto px-2 py-0.5 rounded text-[10px] font-bold bg-white text-slate-700 border border-slate-300"
               >
-                {relayActionLoading === '3_SHED' ? 'Dispatching...' : 'Turn OFF (Shed)'}
-              </button>
-              <button
-                onClick={() => handleRelayAction(3, 'RESTORE')}
-                disabled={relayActionLoading !== null}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-all text-white font-black text-xs py-2 px-2 rounded-xl disabled:opacity-40 cursor-pointer shadow-xs"
-              >
-                {relayActionLoading === '3_RESTORE' ? 'Dispatching...' : 'Turn ON (Restore)'}
+                🔄 Flip Polarity ({isActiveLow ? 'Active-Low' : 'Active-High'})
               </button>
             </div>
-          </div>
-
-        </div>
-
-        {/* Hardware Wiring & Diagnostics Guide */}
-        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
-              <span>🔌 Raspberry Pi 4B Physical Wiring &amp; Header Pin Map</span>
-            </span>
-            <span className="text-[10px] font-black bg-indigo-100 text-indigo-900 border border-indigo-300 px-2.5 py-0.5 rounded-full">
-              40-Pin Header Verification
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs mb-3">
-            <div className="bg-white border rounded-xl p-2.5">
-              <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 1 (Feeder 1)</span>
-              <span className="text-indigo-950 font-black text-sm">Header Pin 21</span>
-              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 9 (or 21)</span>
-            </div>
-            <div className="bg-white border rounded-xl p-2.5">
-              <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 2 (Feeder 2)</span>
-              <span className="text-indigo-950 font-black text-sm">Header Pin 22</span>
-              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 25 (or 22)</span>
-            </div>
-            <div className="bg-white border rounded-xl p-2.5">
-              <span className="text-slate-500 font-bold block text-[10px] uppercase">Relay 3 (Feeder 3)</span>
-              <span className="text-indigo-950 font-black text-sm">Header Pin 23</span>
-              <span className="text-[11px] text-slate-500 block font-mono">BCM GPIO 11 (or 23)</span>
-            </div>
-            <div className="bg-white border rounded-xl p-2.5">
-              <span className="text-slate-500 font-bold block text-[10px] uppercase">Module Power (VCC)</span>
-              <span className="text-rose-950 font-black text-sm">Pin 2 or 4 (+5V)</span>
-              <span className="text-[11px] text-slate-500 block">5V DC Rail</span>
-            </div>
-            <div className="bg-white border rounded-xl p-2.5">
-              <span className="text-slate-500 font-bold block text-[10px] uppercase">Module Ground (GND)</span>
-              <span className="text-slate-950 font-black text-sm">Pin 6 or 14</span>
-              <span className="text-[11px] text-slate-500 block">Common Ground</span>
+            <div className="text-[11px] text-slate-500">
+              Header Pin 21 = BCM 9 (Switch 1) &bull; Pin 22 = BCM 25 (Switch 2) &bull; Pin 23 = BCM 11 (Switch 3). Dual-Drive is active.
             </div>
           </div>
-
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-950 space-y-1">
-            <div className="font-black text-amber-900">⚠️ Hardware Check If Relays Do Not Click Or LEDs Stay Dark:</div>
-            <div>&bull; <strong>Relay Board PWR LED:</strong> Verify the red power LED on the relay board is ON. If dark, check +5V (Pin 2/4) and GND (Pin 6/14).</div>
-            <div>&bull; <strong>Yellow JD-VCC Jumper:</strong> Multi-channel relay boards require the small yellow jumper shunt placed between <code>JD-VCC</code> and <code>VCC</code> to power the coils.</div>
-            <div>&bull; <strong>Polarity Toggle:</strong> If your relay uses active-high triggering or your load is connected to <strong>NC (Normally Closed)</strong>, click the <strong>&quot;Flip Polarity&quot;</strong> button above.</div>
-            <div>&bull; <strong>Audible Test:</strong> Click the <strong>&quot;⚡ Test Pulse&quot;</strong> button to rapidly drive all 3 channels so you can verify the channel indicator LEDs and hear the physical click.</div>
-          </div>
-        </div>
-
-        {/* Priority Timing Flow Diagram & Energy Saving Strategy */}
-        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-          <div className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex items-center gap-2">
-            <span>🔄 Autonomous Staggered Shedding &amp; Reconnection Strategy</span>
-            <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md">
-              Anti-Inrush Interlock
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            {/* Shedding Sequence */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="font-bold text-rose-950 mb-1.5 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-600"></span>
-                Shedding Sequence (Demand &gt; {isLive ? '140 VA' : '90 kW'} Safe Limit)
-              </div>
-              <div className="flex items-center text-[11px] font-mono font-semibold text-slate-700 gap-1.5 flex-wrap">
-                <span className="bg-rose-100 text-rose-900 px-2 py-1 rounded-md border border-rose-200">
-                  1. Shed Relay 1 (1st)
-                </span>
-                <span>➔ ⏱️ 8s Dwell ➔</span>
-                <span className="bg-amber-100 text-amber-900 px-2 py-1 rounded-md border border-amber-200">
-                  2. Shed Relay 2 (2nd)
-                </span>
-                <span>➔ ⏱️ 8s Dwell ➔</span>
-                <span className="bg-indigo-100 text-indigo-900 px-2 py-1 rounded-md border border-indigo-200">
-                  3. Shed Relay 3 (3rd)
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-500 mt-2">
-                Staggered 8-second dwell prevents unnecessary tripping if shedding Relay 1 immediately brings demand back under the safe operating limit.
-              </p>
-            </div>
-
-            {/* Restoration Sequence */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3">
-              <div className="font-bold text-emerald-950 mb-1.5 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
-                Reconnection Sequence (Demand &le; {isLive ? '120 VA' : '85 kW'} Safe Band)
-              </div>
-              <div className="flex items-center text-[11px] font-mono font-semibold text-slate-700 gap-1.5 flex-wrap">
-                <span className="bg-indigo-100 text-indigo-900 px-2 py-1 rounded-md border border-indigo-200">
-                  1. Restore Relay 3 (1st)
-                </span>
-                <span>➔ ⏱️ 10s Surge Delay ➔</span>
-                <span className="bg-amber-100 text-amber-900 px-2 py-1 rounded-md border border-amber-200">
-                  2. Restore Relay 2 (2nd)
-                </span>
-                <span>➔ ⏱️ 10s Surge Delay ➔</span>
-                <span className="bg-rose-100 text-rose-900 px-2 py-1 rounded-md border border-rose-200">
-                  3. Restore Relay 1 (3rd)
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-500 mt-2">
-                Restoring core loads first with 10-second spacing mitigates motor starting inrush currents and prevents ceiling boundary overshoot.
-              </p>
-            </div>
-          </div>
-        </div>
+        </details>
       </div>
 
       {/* =================================================================== */}
